@@ -1,0 +1,19 @@
+* C:\Users\jezap\Desktop\Personal\Sonido\Circuit\GuitarLineIn.asc
+XTL974 Vin N001 V+ V- Vo level2 Avol=1Meg GBW=10Meg Slew=10Meg Ilimit=25m Rail=0 Vos=0 En=0 Enk=0 In=0 Ink=0 Rin=500Meg
+V1 N002 0 SINE(0 0.8 1K) AC 1
+V2 V+ 0 5
+V3 0 V- 5
+C2 V+ 0 10µ
+R3 N001 0 100R
+R4 Vo N001 220R
+C3 0 V+ 100n
+C4 0 V- 100n
+C1 0 V- 10µ
+R6 N002 0 1m
+R1 Vin N002 10k
+R2 Vin N003 10k
+V4 N003 0 1V
+.tran 10m
+.lib UniversalOpAmp2.lib
+.backanno
+.end
