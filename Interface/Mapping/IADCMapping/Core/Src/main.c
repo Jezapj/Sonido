@@ -50,10 +50,16 @@ TIM_HandleTypeDef htim6;
 
 /* USER CODE BEGIN PV */
 #define ADC_BUF_SIZE 128
-#define I2S_BUF_SIZE 256  // 2x ADC size for stereo L+R
+
+// SAI I2S standard always clocks 2 slots (L+R) per frame even in mono mode.
+// The DMA transfer unit is one 16-bit half-word per slot, so for 128 audio
+// samples we need 128*2 = 256 half-words in the I2S buffer.
+// We interleave: even indices = Left (audio), odd indices = Right (silence).
+#define AUDIO_SAMPLES  ADC_BUF_SIZE
+#define I2S_BUF_SIZE   (AUDIO_SAMPLES * 2)   // 256 half-words
 
 uint16_t adc_buf[ADC_BUF_SIZE];
-int16_t  i2s_buf[I2S_BUF_SIZE];
+int16_t  i2s_buf[I2S_BUF_SIZE];              // interleaved L, R, L, R, ...
 
 /* USER CODE END PV */
 
@@ -70,7 +76,28 @@ static void MX_SAI1_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+void forcesilence(void) {
+    memset(i2s_buf, 0, sizeof(i2s_buf));
+}
 
+// Helper: convert one ADC sample and write both L and R slots in i2s_buf.
+// 'adc_idx'  - index into adc_buf  (0 .. ADC_BUF_SIZE-1)
+// 'i2s_base' - first slot index for this sample (always 2*adc_idx)
+static inline void convert_sample(int adc_idx, int i2s_base)
+{
+#define DC_OFFSET  2048
+#define NOISE_GATE 0
+
+    int32_t s = ((int32_t)adc_buf[adc_idx] - DC_OFFSET) * 16;
+    if (s >  32767) s =  32767;
+    if (s < -32768) s = -32768;
+    int16_t sample = (int16_t)s;
+    int32_t abs_s  = sample < 0 ? -sample : sample;
+    int16_t out    = abs_s < NOISE_GATE ? 0 : sample;
+
+    i2s_buf[i2s_base]     = out;   // Left  slot  — carries audio
+    i2s_buf[i2s_base + 1] = 0;     // Right slot  — silence (DAC may use it)
+}
 /* USER CODE END 0 */
 
 /**
@@ -118,16 +145,14 @@ int main(void)
   HAL_ADCEx_Calibration_Start(&hadc1, ADC_SINGLE_ENDED);
   HAL_Delay(10);
 
-
+  // Pre-fill i2s_buf with silence so SAI DMA has valid data immediately
+  forcesilence();
 
   // Start ADC DMA
   HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adc_buf, ADC_BUF_SIZE);
 
-
-
-  // Start SAI DMA
+  // Start SAI DMA — pass I2S_BUF_SIZE (256 half-words = 128 stereo frames)
   HAL_SAI_Transmit_DMA(&hsai_BlockA1, (uint8_t*)i2s_buf, I2S_BUF_SIZE);
-
 
   // Start timer last
   HAL_TIM_Base_Start(&htim6);
@@ -153,7 +178,6 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-	volatile uint16_t debug_sample = adc_buf[0];
   }
   /* USER CODE END 3 */
 }
@@ -182,8 +206,8 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
-  RCC_OscInitStruct.PLL.PLLM = 1;
-  RCC_OscInitStruct.PLL.PLLN = 20;
+  RCC_OscInitStruct.PLL.PLLM = 2;
+  RCC_OscInitStruct.PLL.PLLN = 40;
   RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV7;
   RCC_OscInitStruct.PLL.PLLQ = RCC_PLLQ_DIV2;
   RCC_OscInitStruct.PLL.PLLR = RCC_PLLR_DIV4;
@@ -197,11 +221,11 @@ void SystemClock_Config(void)
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
-  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
+  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV2;
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_4) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
   {
     Error_Handler();
   }
@@ -228,7 +252,7 @@ static void MX_ADC1_Init(void)
   /** Common config
   */
   hadc1.Instance = ADC1;
-  hadc1.Init.ClockPrescaler = ADC_CLOCK_ASYNC_DIV1;
+  hadc1.Init.ClockPrescaler = ADC_CLOCK_ASYNC_DIV4;
   hadc1.Init.Resolution = ADC_RESOLUTION_12B;
   hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
   hadc1.Init.ScanConvMode = ADC_SCAN_DISABLE;
@@ -240,7 +264,7 @@ static void MX_ADC1_Init(void)
   hadc1.Init.ExternalTrigConv = ADC_EXTERNALTRIG_T6_TRGO;
   hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_RISING;
   hadc1.Init.DMAContinuousRequests = ENABLE;
-  hadc1.Init.Overrun = ADC_OVR_DATA_PRESERVED;
+  hadc1.Init.Overrun = ADC_OVR_DATA_OVERWRITTEN;
   hadc1.Init.OversamplingMode = DISABLE;
   if (HAL_ADC_Init(&hadc1) != HAL_OK)
   {
@@ -251,7 +275,7 @@ static void MX_ADC1_Init(void)
   */
   sConfig.Channel = ADC_CHANNEL_5;
   sConfig.Rank = ADC_REGULAR_RANK_1;
-  sConfig.SamplingTime = ADC_SAMPLETIME_2CYCLES_5;
+  sConfig.SamplingTime = ADC_SAMPLETIME_247CYCLES_5;
   sConfig.SingleDiff = ADC_SINGLE_ENDED;
   sConfig.OffsetNumber = ADC_OFFSET_NONE;
   sConfig.Offset = 0;
@@ -288,16 +312,15 @@ static void MX_SAI1_Init(void)
   hsai_BlockA1.Init.FIFOThreshold = SAI_FIFOTHRESHOLD_EMPTY;
   hsai_BlockA1.Init.AudioFrequency = SAI_AUDIO_FREQUENCY_48K;
   hsai_BlockA1.Init.SynchroExt = SAI_SYNCEXT_DISABLE;
-  hsai_BlockA1.Init.MonoStereoMode = SAI_STEREOMODE;
+  hsai_BlockA1.Init.MonoStereoMode = SAI_MONOMODE;
   hsai_BlockA1.Init.CompandingMode = SAI_NOCOMPANDING;
   hsai_BlockA1.Init.TriState = SAI_OUTPUT_NOTRELEASED;
-
   if (HAL_SAI_InitProtocol(&hsai_BlockA1, SAI_I2S_STANDARD, SAI_PROTOCOL_DATASIZE_16BIT, 2) != HAL_OK)
   {
     Error_Handler();
   }
   /* USER CODE BEGIN SAI1_Init 2 */
-  __HAL_SAI_ENABLE(&hsai_BlockA1);
+
   /* USER CODE END SAI1_Init 2 */
 
 }
@@ -392,21 +415,19 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+// ADC DMA half-complete: fill first half of i2s_buf (samples 0..63)
+// Each ADC sample maps to TWO i2s_buf slots: [2i]=Left, [2i+1]=Right(silence)
 void HAL_ADC_ConvHalfCpltCallback(ADC_HandleTypeDef* hadc) {
-    // Process first half of adc_buf → first half of i2s_buf
-    for (int i = 0; i < ADC_BUF_SIZE/2; i++) {
-        int16_t sample = ((int16_t)adc_buf[i] - 2048) << 4;
-        i2s_buf[i*2]   = sample; // Left channel
-        i2s_buf[i*2+1] = sample; // Right channel
+    for (int i = 0; i < ADC_BUF_SIZE / 2; i++) {
+        convert_sample(i, i * 2);
     }
 }
 
+// ADC DMA complete: fill second half of i2s_buf (samples 64..127)
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc) {
-    // Process second half of adc_buf → second half of i2s_buf
-    for (int i = ADC_BUF_SIZE/2; i < ADC_BUF_SIZE; i++) {
-        int16_t sample = ((int16_t)adc_buf[i] - 2048) << 4;
-        i2s_buf[i*2]   = sample;
-        i2s_buf[i*2+1] = sample;
+    for (int i = ADC_BUF_SIZE / 2; i < ADC_BUF_SIZE; i++) {
+        convert_sample(i, i * 2);
     }
 }
 
@@ -419,7 +440,6 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc) {
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
-  /* User can add his own implementation to report the HAL error return state */
   __disable_irq();
   while (1)
   {
@@ -427,18 +447,9 @@ void Error_Handler(void)
   /* USER CODE END Error_Handler_Debug */
 }
 #ifdef USE_FULL_ASSERT
-/**
-  * @brief  Reports the name of the source file and the source line number
-  *         where the assert_param error has occurred.
-  * @param  file: pointer to the source file name
-  * @param  line: assert_param error line source number
-  * @retval None
-  */
 void assert_failed(uint8_t *file, uint32_t line)
 {
   /* USER CODE BEGIN 6 */
-  /* User can add his own implementation to report the file name and line number,
-     ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */

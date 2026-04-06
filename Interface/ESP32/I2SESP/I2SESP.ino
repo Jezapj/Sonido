@@ -1,5 +1,9 @@
 #include <Arduino.h>
 #include "driver/i2s_std.h"
+#include <math.h>
+
+#define SAMPLE_RATE 48000
+#define BLOCK_SIZE  64
 
 i2s_chan_handle_t tx_handle;
 i2s_chan_handle_t rx_handle;
@@ -8,112 +12,102 @@ void setup()
 {
     Serial.begin(115200);
     delay(2000);
-    Serial.println("Starting...");
+    Serial.println("Starting Passthrough...");
 
-    // ================= RX (FROM STM32 via I2S0 SLAVE) =================
-    i2s_chan_config_t rx_cfg =
-        I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_SLAVE);
-    rx_cfg.dma_desc_num  = 16;
-    rx_cfg.dma_frame_num = 64;
+    // ================= RX (FROM STM32 via I2S0 SLAVE - STEREO) =================
+    i2s_chan_config_t rx_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_SLAVE);
+    rx_cfg.dma_desc_num  = 32;
+    rx_cfg.dma_frame_num = 128;
 
     ESP_ERROR_CHECK(i2s_new_channel(&rx_cfg, NULL, &rx_handle));
 
     i2s_std_config_t rx_std_cfg = {
-        .clk_cfg  = I2S_STD_CLK_DEFAULT_CONFIG(48000),
+        .clk_cfg  = I2S_STD_CLK_DEFAULT_CONFIG(SAMPLE_RATE),
         .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(
                         I2S_DATA_BIT_WIDTH_16BIT,
-                        I2S_SLOT_MODE_STEREO),
+                        I2S_SLOT_MODE_STEREO   // FIXED: was MONO
+                    ),
         .gpio_cfg = {
-            .mclk  = I2S_GPIO_UNUSED,
-            .bclk  = GPIO_NUM_15,
-            .ws    = GPIO_NUM_16,
-            .dout  = I2S_GPIO_UNUSED,
-            .din   = GPIO_NUM_17,
-            .invert_flags = {
-                .mclk_inv = false,
-                .bclk_inv = false,
-                .ws_inv   = false,
-            },
+            .mclk = I2S_GPIO_UNUSED,
+            .bclk = GPIO_NUM_15,
+            .ws   = GPIO_NUM_16,
+            .dout = I2S_GPIO_UNUSED,
+            .din  = GPIO_NUM_17,
         },
     };
 
     ESP_ERROR_CHECK(i2s_channel_init_std_mode(rx_handle, &rx_std_cfg));
     ESP_ERROR_CHECK(i2s_channel_enable(rx_handle));
-    Serial.println("RX I2S ready");
 
-    // ================= TX (TO AMP via I2S1 MASTER) =================
-    i2s_chan_config_t tx_cfg =
-        I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_1, I2S_ROLE_MASTER);
-    tx_cfg.dma_desc_num  = 16;
-    tx_cfg.dma_frame_num = 64;
+    // ================= TX (TO AMP via I2S1 MASTER - STEREO) =================
+    i2s_chan_config_t tx_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_1, I2S_ROLE_MASTER);
+    tx_cfg.dma_desc_num  = 32;
+    tx_cfg.dma_frame_num = 128;
 
     ESP_ERROR_CHECK(i2s_new_channel(&tx_cfg, &tx_handle, NULL));
 
     i2s_std_config_t tx_std_cfg = {
-        .clk_cfg  = I2S_STD_CLK_DEFAULT_CONFIG(48000),
+        .clk_cfg  = I2S_STD_CLK_DEFAULT_CONFIG(SAMPLE_RATE),
         .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(
-                        I2S_DATA_BIT_WIDTH_16BIT,
-                        I2S_SLOT_MODE_STEREO),
+                        I2S_DATA_BIT_WIDTH_32BIT,
+                        I2S_SLOT_MODE_STEREO
+                    ),
         .gpio_cfg = {
-            .mclk  = I2S_GPIO_UNUSED,
-            .bclk  = GPIO_NUM_10,
-            .ws    = GPIO_NUM_11,
-            .dout  = GPIO_NUM_12,
-            .din   = I2S_GPIO_UNUSED,
-            .invert_flags = {
-                .mclk_inv = false,
-                .bclk_inv = false,
-                .ws_inv   = false,
-            },
+            .mclk = I2S_GPIO_UNUSED,
+            .bclk = GPIO_NUM_10,
+            .ws   = GPIO_NUM_11,
+            .dout = GPIO_NUM_12,
+            .din  = I2S_GPIO_UNUSED,
         },
     };
 
     ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx_handle, &tx_std_cfg));
     ESP_ERROR_CHECK(i2s_channel_enable(tx_handle));
-    Serial.println("TX I2S ready");
-
-    Serial.println("Audio passthrough running");
+    
+    Serial.println("I2S Passthrough running");
 }
 
 void loop()
 {
-    int16_t samples[128];
-    size_t bytes_read    = 0;
+    // Buffer for 16-bit stereo input (L + R)
+    int16_t rx_buf[BLOCK_SIZE * 2];
+
+    // Buffer for 32-bit stereo output
+    int32_t tx_buf[BLOCK_SIZE * 2];
+    
+    size_t bytes_read = 0;
     size_t bytes_written = 0;
 
+    // 1. Read from RX
     esp_err_t err = i2s_channel_read(
         rx_handle,
-        samples,
-        sizeof(samples),
+        rx_buf,
+        sizeof(rx_buf),
         &bytes_read,
-        pdMS_TO_TICKS(1000));
+        pdMS_TO_TICKS(100)
+    );
 
-    if (err == ESP_ERR_TIMEOUT) {
-        Serial.println("Timeout - no data from STM32");
-        return;
+    if (err == ESP_OK && bytes_read > 0) {
+        // Number of stereo frames
+        int frames_read = bytes_read / (sizeof(int16_t) * 2);
+
+        // 2. Extract LEFT channel and duplicate to stereo 32-bit
+        for (int i = 0; i < frames_read; i++) {
+            int16_t left_sample = rx_buf[i * 2];  // LEFT slot
+
+            int32_t sample_32 = (int32_t)left_sample << 16;
+
+            tx_buf[i * 2]     = sample_32; // Left out
+            tx_buf[i * 2 + 1] = sample_32; // Right out
+        }
+
+        // 3. Write to TX
+        i2s_channel_write(
+            tx_handle,
+            tx_buf,
+            frames_read * 2 * sizeof(int32_t),
+            &bytes_written,
+            pdMS_TO_TICKS(100)
+        );
     }
-
-    if (err != ESP_OK) {
-        Serial.print("Read error: ");
-        Serial.println(err);
-        return;
-    }
-
-    // ================= DSP GOES HERE =================
-    // samples[] contains interleaved stereo 16-bit signed PCM
-    // samples[0] = Left ch 0, samples[1] = Right ch 0
-    // samples[2] = Left ch 1, samples[3] = Right ch 1 etc.
-    // Example: simple volume scale at 80%
-    int num_samples = bytes_read / sizeof(int16_t);
-    for (int i = 0; i < num_samples; i++) {
-        samples[i] = (int16_t)(samples[i] * 0.8f);
-    }
-    // =================================================
-
-    i2s_channel_write(
-        tx_handle,
-        samples,
-        bytes_read,
-        &bytes_written,
-        pdMS_TO_TICKS(1000));
 }
