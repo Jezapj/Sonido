@@ -1,0 +1,7 @@
+../Core/Src/main.c:86:20:convert_sample	0	static
+../Core/Src/main.c:79:6:forcesilence	0	static
+../Core/Src/main.c:189:6:SystemClock_Config	96	static,ignoring_inline_asm
+../Core/Src/main.c:107:5:main	48	static,ignoring_inline_asm
+../Core/Src/main.c:420:6:HAL_ADC_ConvHalfCpltCallback	8	static
+../Core/Src/main.c:428:6:HAL_ADC_ConvCpltCallback	8	static
+../Core/Src/main.c:441:6:Error_Handler	0	static,ignoring_inline_asm

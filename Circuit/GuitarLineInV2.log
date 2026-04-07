@@ -2,20 +2,20 @@ Circuit: * C:\Users\jezap\Desktop\Personal\Sonido\Circuit\GuitarLineInV2.asc
 
 Direct Newton iteration for .op point succeeded.
 
-Date: Sat Mar 07 12:37:28 2026
-Total elapsed time: 0.123 seconds.
+Date: Tue Apr 07 18:58:32 2026
+Total elapsed time: 0.151 seconds.
 
 tnom = 27
 temp = 27
 method = modified trap
-totiter = 21343
-traniter = 21307
-tranpoints = 9076
-accept = 5745
-rejected = 3331
+totiter = 31080
+traniter = 31056
+tranpoints = 11450
+accept = 7531
+rejected = 3919
 matrix size = 15
 fillins = 1
 solver = Normal
 Matrix Compiler1: 764 bytes object code size  0.2/0.1/[0.1]
-Matrix Compiler2: off  [0.1]/0.2/0.1
+Matrix Compiler2: 1.10 KB object code size  0.1/0.2/[0.1]
 

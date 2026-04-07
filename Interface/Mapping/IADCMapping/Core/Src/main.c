@@ -96,7 +96,7 @@ static inline void convert_sample(int adc_idx, int i2s_base)
     int16_t out    = abs_s < NOISE_GATE ? 0 : sample;
 
     i2s_buf[i2s_base]     = out;   // Left  slot  — carries audio
-    i2s_buf[i2s_base + 1] = 0;     // Right slot  — silence (DAC may use it)
+    i2s_buf[i2s_base + 1] = out;     // Right slot  — also carrying audio
 }
 /* USER CODE END 0 */
 
@@ -146,7 +146,7 @@ int main(void)
   HAL_Delay(10);
 
   // Pre-fill i2s_buf with silence so SAI DMA has valid data immediately
-  forcesilence();
+  //forcesilence();
 
   // Start ADC DMA
   HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adc_buf, ADC_BUF_SIZE);
@@ -345,7 +345,7 @@ static void MX_TIM6_Init(void)
   htim6.Instance = TIM6;
   htim6.Init.Prescaler = 0;
   htim6.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim6.Init.Period = 1665;
+  htim6.Init.Period = 1666;
   htim6.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim6) != HAL_OK)
   {
@@ -416,17 +416,18 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
-// ADC DMA half-complete: fill first half of i2s_buf (samples 0..63)
-// Each ADC sample maps to TWO i2s_buf slots: [2i]=Left, [2i+1]=Right(silence)
+/* Process first half of buffers (0 to 63) */
 void HAL_ADC_ConvHalfCpltCallback(ADC_HandleTypeDef* hadc) {
-    for (int i = 0; i < ADC_BUF_SIZE / 2; i++) {
+    for (int i = 0; i < 64; i++) {
+        // i is the ADC index, i*2 is the I2S base index (interleaved)
         convert_sample(i, i * 2);
     }
 }
 
-// ADC DMA complete: fill second half of i2s_buf (samples 64..127)
+/* Process second half of buffers (64 to 127) */
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc) {
-    for (int i = ADC_BUF_SIZE / 2; i < ADC_BUF_SIZE; i++) {
+    for (int i = 64; i < 128; i++) {
+        // i is the ADC index, i*2 is the I2S base index
         convert_sample(i, i * 2);
     }
 }
@@ -447,6 +448,13 @@ void Error_Handler(void)
   /* USER CODE END Error_Handler_Debug */
 }
 #ifdef USE_FULL_ASSERT
+/**
+  * @brief  Reports the name of the source file and the source line number
+  *         where the assert_param error has occurred.
+  * @param  file: pointer to the source file name
+  * @param  line: assert_param error line source number
+  * @retval None
+  */
 void assert_failed(uint8_t *file, uint32_t line)
 {
   /* USER CODE BEGIN 6 */
