@@ -13,7 +13,7 @@ int main()
     dsp_chain_init(&dsp, FS);
 
     // Default params
-    params.pre_gain = 1.0f;
+    params.pre_gain = 2.0f;
 
     params.eq_low_freq  = 100.0f;
     params.eq_mid_freq  = 1000.0f;
@@ -23,8 +23,8 @@ int main()
     params.eq_mid_q  = 1.0f;
     params.eq_high_q = 0.7;
 
-    params.eq_low_gain_db  = 0.0f;
-    params.eq_mid_gain_db  = 0.0f;
+    params.eq_low_gain_db  = 2.0f;
+    params.eq_mid_gain_db  = 10.0f;
     params.eq_high_gain_db = 0.0f;
 
     params.limiter_threshold = 0.995f;
