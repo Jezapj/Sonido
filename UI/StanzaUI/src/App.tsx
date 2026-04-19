@@ -1,50 +1,62 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import reactLogo from "./assets/react.svg";
 import { invoke } from "@tauri-apps/api/core";
 import "./App.css";
+import FloatingLines from './FloatingLines';
 
 function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
+  const greetMsgRef = useRef("");
+  const nameRef = useRef("");
+  const [, forceUpdate] = useState(0); // used to trigger re-render
 
   async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke("greet", { name }));
+    greetMsgRef.current = await invoke("greet", { name: nameRef.current });
+    forceUpdate(n => n + 1); // force UI update
   }
 
   return (
-    <main className="container">
-      <h1>Welcome to Tauri + React</h1>
-
-      <div className="row">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
-
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
+    <>
+      <div style={{ width: '100%', height: '100%', position: 'absolute', zIndex: -1 }}>
+        <FloatingLines 
+          enabledWaves="middle,bottom,top"
+          lineCount={8}
+          lineDistance={8}
+          bendRadius={8}
+          bendStrength={-2}
+          interactive={true}
+          parallax={true}
+          animationSpeed={1}
+          gradientStart="#2d0630"
+          gradientMid="#1f5c70"
+          gradientEnd="#042d13"
         />
-        <button type="submit">GreetTest</button>
-      </form>
-      <p>{greetMsg}</p>
-    </main>
+      </div>
+
+      <main className="container">
+        <h1>Interactive Audio DSP</h1>
+
+        <div className="row">
+          <img src="/STANZA_W_TP.png"/>
+        </div>
+
+        <form
+          className="row"
+          onSubmit={(e) => {
+            e.preventDefault();
+            greet();
+          }}
+        >
+          <input
+            id="greet-input"
+            onChange={(e) => (nameRef.current = e.currentTarget.value)}
+            placeholder="Enter your Username..."
+          />
+          <button type="submit">Enter</button>
+        </form>
+
+        <p>{greetMsgRef.current}</p>
+      </main>
+    </>
   );
 }
 

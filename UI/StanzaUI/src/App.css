@@ -10,6 +10,11 @@
   font-size: 16px;
   line-height: 24px;
   font-weight: 400;
+  overflow: hidden;
+
+  /*-- Center the content from Tauri viewport quirk --*/
+  margin-left: -0.5vw;
+  margin-top: -1vh;
 
   color: #0f0f0f;
   background-color: #f6f6f6;
@@ -99,6 +104,7 @@ button {
   :root {
     color: #f6f6f6;
     background-color: #2f2f2f;
+    overflow: hidden;
   }
 
   a:hover {
