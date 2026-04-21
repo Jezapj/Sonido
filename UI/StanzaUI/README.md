@@ -16,6 +16,9 @@ Make sure you have installed the prerequisites for your OS: https://tauri.app/st
   npm install three
   npm install motion
   
+  npx shadcn@latest init --no-css-variables
+  npx shadcn@latest add @react-bits/ShapeGrid-TS-CSS //may not work without tailwind
+  
   npm run tauri android init
 
 For Desktop development, run:

@@ -267,7 +267,7 @@ export default function FloatingLines({
   bendStrength = -0.5,
   mouseDamping = 0.05,
   parallax = true,
-  parallaxStrength = 0.2,
+  parallaxStrength = 0.3,
   mixBlendMode = 'screen'
 }: FloatingLinesProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);

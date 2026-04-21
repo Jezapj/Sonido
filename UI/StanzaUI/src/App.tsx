@@ -5,6 +5,7 @@ import "./App.css";
 import FloatingLines from './FloatingLines';
 import { VscHome, VscArchive, VscAccount, VscSettingsGear } from "react-icons/vsc";
 import Dock from './Dock';
+import ShapeGrid from './ShapeGrid';
 
 
 
@@ -13,41 +14,104 @@ function App() {
   const nameRef = useRef("");
 
   const [view, setView] = useState("landing"); // 👈 controls page
+  const [bgVariant, setBgVariant] = useState(0);
 
   const items = [
-  { icon: <VscHome size={18} />, label: 'Home', onClick: () => setView("landing") },
+  { icon: <VscHome size={18} />, label: 'Home', onClick: () => navHome() },
   { icon: <VscArchive size={18} />, label: 'Board', onClick: () => alert('Archive!') },
   { icon: <VscAccount size={18} />, label: 'Profile', onClick: () => alert('Profile!') },
   { icon: <VscSettingsGear size={18} />, label: 'Settings', onClick: () => alert('Settings!') },
 ];
-
+  function switchBg() {
+    setBgVariant(prev => (prev === 0 ? 1 : 0));
+  }
   async function enter() {
     greetMsgRef.current = await invoke("greet", { name: nameRef.current });
 
-    // wait 2 seconds
+    
+    // This is navigation to a new page, im going to put a new background here
     setTimeout(() => {
       setView("main");
-    }, 1000);
+      switchBg();
+    }, 800);
+  }
+  function navHome() {
+    
+    setTimeout(() => {
+      setView("landing");
+      switchBg();
+    }, 800);
+
+    
   }
 
   return (
     <>
-      {/* background always present */}
-      <div style={{ width: '100%', height: '100%', position: 'absolute', zIndex: -1 }}>
-        <FloatingLines 
-          enabledWaves="middle,bottom,top"
-          lineCount={8}
-          lineDistance={8}
-          bendRadius={8}
-          bendStrength={-2}
-          interactive={true}
-          parallax={true}
-          animationSpeed={1}
-          gradientStart="#2d0630"
-          gradientMid="#1f5c70"
-          gradientEnd="#042d13"
-        />
-      </div>
+      <div style={{ position: 'absolute', width: '100%', height: '100%', zIndex: -1 }}>
+  
+  {/* Background 1 */}
+  <div
+    style={{
+      position: 'absolute',
+      width: '100%',
+      height: '100%',
+      opacity: bgVariant === 0 ? 1 : 1,
+      transition: 'opacity 0.6s ease-in-out',
+      pointerEvents: 'none'
+    }}
+  >
+    <FloatingLines 
+      enabledWaves="middle,bottom,top"
+      lineCount={8}
+      lineDistance={8}
+      bendRadius={8}
+      bendStrength={-2}
+      interactive={true}
+      parallax={true}
+      animationSpeed={1}
+      gradientStart="#2d0630"
+      gradientMid="#1f5c70"
+      gradientEnd="#042d13"
+    />
+  </div>
+
+  {/* Background 2 */}
+  <div
+    style={{
+      position: 'absolute',
+      width: '100%',
+      height: '100%',
+      opacity: bgVariant === 1 ? 1 : 0,
+      transition: 'opacity 0.6s ease-in-out',
+      pointerEvents: 'none'
+    }}
+  >
+    <ShapeGrid 
+      speed={0.5}
+      squareSize={40}
+      direction="diagonal"
+      borderColor="#2F293A"
+      hoverFillColor="#222"
+      shape="square"
+      hoverTrailAmount={0}
+    />
+
+    <FloatingLines 
+      enabledWaves="middle,bottom,top"
+      lineCount={8}
+      lineDistance={8}
+      bendRadius={8}
+      bendStrength={-2}
+      interactive={true}
+      parallax={true}
+      animationSpeed={1}
+      gradientStart="#2d0630"
+      gradientMid="#1f5c70"
+      gradientEnd="#042d13"
+    />
+  </div>
+
+</div>
 
       {/* -------- LANDING SCREEN -------- */}
       {view === "landing" && (
@@ -80,7 +144,7 @@ function App() {
       {/* -------- MAIN APP SCREEN -------- */}
       {view === "main" && (
         <main className="container">
-          <p>{greetMsgRef.current}</p>
+          <h1>{greetMsgRef.current}</h1>
           <Dock 
             items={items}
             panelHeight={68}
