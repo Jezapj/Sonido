@@ -213,7 +213,7 @@ type WavePosition = {
 
 type FloatingLinesProps = {
   linesGradient?: string[];
-  enabledWaves?: Array<'top' | 'middle' | 'bottom'>;
+  enabledWaves?: Array<string>;
   lineCount?: number | number[];
   lineDistance?: number | number[];
   topWavePosition?: WavePosition;
@@ -226,6 +226,9 @@ type FloatingLinesProps = {
   mouseDamping?: number;
   parallax?: boolean;
   parallaxStrength?: number;
+  gradientStart?: string;
+  gradientMid?: string;
+  gradientEnd?: string;
   mixBlendMode?: React.CSSProperties['mixBlendMode'];
 };
 

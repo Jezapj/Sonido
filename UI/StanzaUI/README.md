@@ -15,6 +15,7 @@ Make sure you have installed the prerequisites for your OS: https://tauri.app/st
   npm install react-icons
   npm install three
   npm install motion
+  npm install gsap
   
   npx shadcn@latest init --no-css-variables
   npx shadcn@latest add @react-bits/ShapeGrid-TS-CSS //may not work without tailwind
@@ -26,3 +27,7 @@ For Desktop development, run:
 
 For Android development, run:
   npm run tauri android dev
+
+Before build
+
+npm i --save-dev @types/three

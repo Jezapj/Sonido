@@ -28,7 +28,7 @@
 
 .container {
   margin: 0;
-  padding-top: 10vh;
+  padding: 5vh;
   display: flex;
   flex-direction: column;
   justify-content: center;

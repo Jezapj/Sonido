@@ -6,6 +6,10 @@ import FloatingLines from './FloatingLines';
 import { VscHome, VscArchive, VscAccount, VscSettingsGear } from "react-icons/vsc";
 import Dock from './Dock';
 import ShapeGrid from './ShapeGrid';
+//import ChromaGrid from './ChromaGrid'
+import MagicBento from './MagicBento'
+
+
 
 
 
@@ -22,6 +26,38 @@ function App() {
   { icon: <VscAccount size={18} />, label: 'Profile', onClick: () => alert('Profile!') },
   { icon: <VscSettingsGear size={18} />, label: 'Settings', onClick: () => alert('Settings!') },
 ];
+
+// const itemCards = [
+//   {
+//     image: "https://i.pravatar.cc/300?img=1",
+//     title: "Sarah Johnson",
+//     subtitle: "Frontend Developer",
+//     handle: "@sarahjohnson",
+//     borderColor: "#3B82F6",
+//     gradient: "linear-gradient(145deg, #3B82F6, #000)",
+//     url: "https://github.com/sarahjohnson"
+//   },
+//   {
+//     image: "https://i.pravatar.cc/300?img=2",
+//     title: "Mike Chen",
+//     subtitle: "Backend Engineer",
+//     handle: "@mikechen",
+//     borderColor: "#10B981",
+//     gradient: "linear-gradient(180deg, #10B981, #000)",
+//     url: "https://linkedin.com/in/mikechen"
+//   },
+//   {
+//     image: "https://i.pravatar.cc/300?img=1",
+//     title: "Sarah Johnson",
+//     subtitle: "Frontend Developer",
+//     handle: "@sarahjohnson",
+//     borderColor: "#3B82F6",
+//     gradient: "linear-gradient(145deg, #3B82F6, #000)",
+//     url: "https://github.com/sarahjohnson"
+//   },
+
+  
+// ];
   function switchBg() {
     setBgVariant(prev => (prev === 0 ? 1 : 0));
   }
@@ -44,6 +80,7 @@ function App() {
 
     
   }
+  
 
   return (
     <>
@@ -61,7 +98,7 @@ function App() {
     }}
   >
     <FloatingLines 
-      enabledWaves="middle,bottom,top"
+      enabledWaves={["top","middle","bottom"]}
       lineCount={8}
       lineDistance={8}
       bendRadius={8}
@@ -90,14 +127,14 @@ function App() {
       speed={0.5}
       squareSize={40}
       direction="diagonal"
-      borderColor="#2F293A"
+      borderColor="#ffffff"
       hoverFillColor="#222"
       shape="square"
       hoverTrailAmount={0}
     />
 
     <FloatingLines 
-      enabledWaves="middle,bottom,top"
+      enabledWaves={["middle,bottom,top"]}
       lineCount={8}
       lineDistance={8}
       bendRadius={8}
@@ -140,11 +177,42 @@ function App() {
           <p>{}</p>
         </main>
       )}
-
+  
       {/* -------- MAIN APP SCREEN -------- */}
       {view === "main" && (
         <main className="container">
-          <h1>{greetMsgRef.current}</h1>
+          {/* <h1>{greetMsgRef.current}</h1> */}
+          
+          {/* <ChromaGrid 
+            items={itemCards}
+            radius={300}
+            damping={0.45}
+            fadeOut={0.6}
+            ease="power3.out"
+          /> */}
+          <div >
+            
+          <MagicBento 
+          textAutoHide={true}
+          enableStars
+          enableSpotlight
+          enableBorderGlow={true}
+          enableTilt={false}
+          enableMagnetism={false}
+          clickEffect={true}
+          spotlightRadius={400}
+          particleCount={12}
+          glowColor="132, 0, 255"
+          disableAnimations={false}
+          >
+            <div style={{backgroundColor: "white", color: "white"}}></div>
+            </MagicBento>
+          
+          
+        
+        
+        </div>
+        
           <Dock 
             items={items}
             panelHeight={68}
