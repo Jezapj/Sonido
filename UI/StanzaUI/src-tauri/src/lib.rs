@@ -1,7 +1,7 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
 fn greet(name: &str) -> String {
-    format!("Welcome, {}! Connect the StanzaBoard to get started!", name)
+    format!("{}*STANZA*", name.to_uppercase())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

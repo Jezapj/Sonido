@@ -35,31 +35,32 @@ const MOBILE_BREAKPOINT = 768;
 const cardData: BentoCardProps[] = [
   {
     color: 'rgba(0, 0, 0, 0.9)',
-    title: 'Analytics',
-    description: 'Track user behavior',
-    label: 'Insights',
-    glowRgb: '255, 0, 0'
+    title: 'Status',
+    description: 'Centralized data view',
+    label: 'Dashboard',
+    glowRgb: '132, 0, 255'
   },
   {
     color: 'rgba(0, 0, 0, 0.9)',
-    title: 'Dashboard',
-    description: 'Centralized data view',
-    label: 'Overview',
+    title: 'FFT',
+    description: 'Waveform analysis',
+    label: 'Waveform',
     glowRgb: '0, 0, 255'
   },
+
   {
     color: 'rgba(0, 0, 0, 0.9)',
-    title: 'Collaboration',
-    description: 'Work together seamlessly',
-    label: 'Teamwork',
-    glowRgb: '0, 255, 0'
+    title: 'Effects',
+    description: 'Pedal selector',
+    label: 'DSP',
+    glowRgb: '0, 255, 255'
   },
   {
     color: 'rgba(0, 0, 0, 0.9)',
-    title: 'Automation',
+    title: 'Saved Setups',
     description: 'Streamline workflows',
-    label: 'Efficiency',
-    glowRgb: '132, 0, 255'
+    label: 'Presets',
+    glowRgb: '255, 0, 255'
   },
 
 ];

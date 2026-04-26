@@ -10,7 +10,7 @@ import ShapeGrid from './ShapeGrid';
 import MagicBento from './MagicBento'
 import ModelViewer from './ModelViewer';
 
-
+import CircularText from './CircularText';
 
 
 
@@ -206,8 +206,17 @@ function App() {
           glowColor="132, 0, 255"
           disableAnimations={false}
           >
+            
             <div style={{backgroundColor: "white", color: "white"}}></div>
+            
             </MagicBento>
+            <CircularText
+  text={greetMsgRef.current}
+  onHover="speedUp"
+  spinDuration={20}
+  className="custom-class"
+/>
+            
           
           
         
