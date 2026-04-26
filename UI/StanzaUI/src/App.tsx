@@ -8,6 +8,7 @@ import Dock from './Dock';
 import ShapeGrid from './ShapeGrid';
 //import ChromaGrid from './ChromaGrid'
 import MagicBento from './MagicBento'
+import ModelViewer from './ModelViewer';
 
 
 
@@ -21,8 +22,8 @@ function App() {
   const [bgVariant, setBgVariant] = useState(0);
 
   const items = [
-  { icon: <VscHome size={18} />, label: 'Home', onClick: () => navHome() },
-  { icon: <VscArchive size={18} />, label: 'Board', onClick: () => alert('Archive!') },
+  { icon: <VscHome size={18} />, label: 'Home', onClick: () => navigate("landing") },
+  { icon: <VscArchive size={18} />, label: 'Board', onClick: () => navigate("board") },
   { icon: <VscAccount size={18} />, label: 'Profile', onClick: () => alert('Profile!') },
   { icon: <VscSettingsGear size={18} />, label: 'Settings', onClick: () => alert('Settings!') },
 ];
@@ -58,7 +59,7 @@ function App() {
 
   
 // ];
-  function switchBg() {
+  function switchBg() { //fix later
     setBgVariant(prev => (prev === 0 ? 1 : 0));
   }
   async function enter() {
@@ -71,10 +72,10 @@ function App() {
       switchBg();
     }, 800);
   }
-  function navHome() {
+  function navigate(location:string, ) {
     
     setTimeout(() => {
-      setView("landing");
+      setView(location);
       switchBg();
     }, 800);
 
@@ -180,7 +181,7 @@ function App() {
   
       {/* -------- MAIN APP SCREEN -------- */}
       {view === "main" && (
-        <main className="container">
+        <main className="container" style={{padding: "5vh 0.5vw 0vh 0.5vw"}}>
           {/* <h1>{greetMsgRef.current}</h1> */}
           
           {/* <ChromaGrid 
@@ -195,12 +196,12 @@ function App() {
           <MagicBento 
           textAutoHide={true}
           enableStars
-          enableSpotlight
+          enableSpotlight={true}
           enableBorderGlow={true}
           enableTilt={false}
           enableMagnetism={false}
           clickEffect={true}
-          spotlightRadius={400}
+          spotlightRadius={500}
           particleCount={12}
           glowColor="132, 0, 255"
           disableAnimations={false}
@@ -212,6 +213,44 @@ function App() {
         
         
         </div>
+        
+          <Dock 
+            items={items}
+            panelHeight={68}
+            baseItemSize={50}
+            magnification={200}
+          />
+        </main>
+      )}
+
+      {/* -------- Board Display SCREEN -------- */}
+      {view === "board" && (
+        <main  >
+          {/* <h1>{greetMsgRef.current}</h1> */}
+          
+          {/* <ChromaGrid 
+            items={itemCards}
+            radius={300}
+            damping={0.45}
+            fadeOut={0.6}
+            ease="power3.out"
+          /> */}
+          <div>
+          <ModelViewer
+          url="https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/main/2.0/ToyCar/glTF-Binary/ToyCar.glb"
+          width={"100vw"}
+          height={"100vh"}
+          modelXOffset={0}
+          modelYOffset={0}
+          enableMouseParallax
+          enableHoverRotation
+          environmentPreset="forest"
+          fadeIn={false}
+          autoRotate={true}
+          autoRotateSpeed={0.35}
+          showScreenshotButton
+        /></div>
+          
         
           <Dock 
             items={items}

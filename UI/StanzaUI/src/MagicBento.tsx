@@ -7,6 +7,7 @@ export interface BentoCardProps {
   title?: string;
   description?: string;
   label?: string;
+  glowRgb?: string;
   textAutoHide?: boolean;
   disableAnimations?: boolean;
 }
@@ -28,46 +29,39 @@ export interface BentoProps {
 
 const DEFAULT_PARTICLE_COUNT = 12;
 const DEFAULT_SPOTLIGHT_RADIUS = 300;
-const DEFAULT_GLOW_COLOR = '132, 0, 255';
+const DEFAULT_GLOW_COLOR = '255, 0, 0';
 const MOBILE_BREAKPOINT = 768;
 
 const cardData: BentoCardProps[] = [
   {
-    color: '#120F17',
+    color: 'rgba(0, 0, 0, 0.9)',
     title: 'Analytics',
     description: 'Track user behavior',
-    label: 'Insights'
+    label: 'Insights',
+    glowRgb: '255, 0, 0'
   },
   {
-    color: '#120F17',
+    color: 'rgba(0, 0, 0, 0.9)',
     title: 'Dashboard',
     description: 'Centralized data view',
-    label: 'Overview'
+    label: 'Overview',
+    glowRgb: '0, 0, 255'
   },
   {
-    color: '#120F17',
+    color: 'rgba(0, 0, 0, 0.9)',
     title: 'Collaboration',
     description: 'Work together seamlessly',
-    label: 'Teamwork'
+    label: 'Teamwork',
+    glowRgb: '0, 255, 0'
   },
   {
-    color: '#120F17',
+    color: 'rgba(0, 0, 0, 0.9)',
     title: 'Automation',
     description: 'Streamline workflows',
-    label: 'Efficiency'
+    label: 'Efficiency',
+    glowRgb: '132, 0, 255'
   },
-  {
-    color: '#120F17',
-    title: 'Integration',
-    description: 'Connect favorite tools',
-    label: 'Connectivity'
-  },
-  {
-    color: '#120F17',
-    title: 'Security',
-    description: 'Enterprise-grade protection',
-    label: 'Protection'
-  }
+
 ];
 
 const createParticleElement = (x: number, y: number, color: string = DEFAULT_GLOW_COLOR): HTMLDivElement => {
@@ -345,7 +339,7 @@ const ParticleCard: React.FC<{
     <div
       ref={cardRef}
       className={`${className} particle-container`}
-      style={{ ...style, position: 'relative', overflow: 'hidden' }}
+      style={{ ...style, position: 'relative', overflow: 'hidden', '--glow-rgb': (style as any)?.['--glow-rgb'] || glowColor } as any}
     >
       {children}
     </div>
@@ -550,7 +544,8 @@ const MagicBento: React.FC<BentoProps> = ({
             className: baseClassName,
             style: {
               backgroundColor: card.color,
-              '--glow-color': glowColor
+              '--glow-color': glowColor,
+              '--glow-rgb': card.glowRgb || glowColor
             } as React.CSSProperties
           };
 

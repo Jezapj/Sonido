@@ -16,6 +16,7 @@ Make sure you have installed the prerequisites for your OS: https://tauri.app/st
   npm install three
   npm install motion
   npm install gsap
+  npm install three @react-three/fiber @react-three/drei
   
   npx shadcn@latest init --no-css-variables
   npx shadcn@latest add @react-bits/ShapeGrid-TS-CSS //may not work without tailwind
@@ -31,3 +32,5 @@ For Android development, run:
 Before build
 
 npm i --save-dev @types/three
+npm run tauri build
+
