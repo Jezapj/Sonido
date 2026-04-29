@@ -10,6 +10,18 @@ export interface BentoCardProps {
   glowRgb?: string;
   textAutoHide?: boolean;
   disableAnimations?: boolean;
+  /**
+   * Optional custom content rendered inside the card body.
+   * Replaces the default title/description block when provided.
+   */
+  content?: React.ReactNode;
+  /**
+   * When true, pointer events are preserved on the injected content so that
+   * any onMouseOver / onClick handlers attached to it continue to fire.
+   * When false (default), pointer-events: none is applied so the card's own
+   * animation layer takes full precedence.
+   */
+  contentInteractive?: boolean;
 }
 
 export interface BentoProps {
@@ -32,37 +44,51 @@ const DEFAULT_SPOTLIGHT_RADIUS = 300;
 const DEFAULT_GLOW_COLOR = '255, 0, 0';
 const MOBILE_BREAKPOINT = 768;
 
+function SubContent(){
+  return (<div style={{position: 'absolute', bottom: '10px', left: '10px', color: 'white'}}>
+    <h3>Subcontent</h3>
+    <p>This content is injected into the card and can be interactive.</p>
+    <button onClick={() => alert('Button inside card clicked!')}>Click Me</button>
+  </div>
+  )
+}
 const cardData: BentoCardProps[] = [
   {
-    color: 'rgba(0, 0, 0, 0.9)',
+    color: 'rgba(0, 0, 0, 0.92)',
     title: 'Status',
     description: 'Centralized data view',
     label: 'Dashboard',
-    glowRgb: '132, 0, 255'
+    glowRgb: '132, 0, 255',
+    content: <SubContent />,
+    contentInteractive: true
   },
   {
-    color: 'rgba(0, 0, 0, 0.9)',
+    color: 'rgba(0, 0, 0, 0.92)',
     title: 'FFT',
     description: 'Waveform analysis',
     label: 'Waveform',
-    glowRgb: '0, 0, 255'
+    glowRgb: '0, 0, 255',
+    content: <SubContent />,
+    contentInteractive: true
   },
-
   {
-    color: 'rgba(0, 0, 0, 0.9)',
+    color: 'rgba(0, 0, 0, 0.92)',
     title: 'Effects',
     description: 'Pedal selector',
     label: 'DSP',
-    glowRgb: '0, 255, 255'
+    glowRgb: '0, 255, 255',
+    
+    contentInteractive: true
   },
   {
-    color: 'rgba(0, 0, 0, 0.9)',
-    title: 'Saved Setups',
+    color: 'rgba(0, 0, 0, 0.2)',
+    title: 'Load/Save Setups',
     description: 'Streamline workflows',
     label: 'Presets',
-    glowRgb: '255, 0, 255'
+    glowRgb: '255, 0, 255',
+    content: <SubContent />,
+    contentInteractive: true
   },
-
 ];
 
 const createParticleElement = (x: number, y: number, color: string = DEFAULT_GLOW_COLOR): HTMLDivElement => {
@@ -99,6 +125,33 @@ const updateCardGlowProperties = (card: HTMLElement, mouseX: number, mouseY: num
   card.style.setProperty('--glow-radius', `${radius}px`);
 };
 
+// ---------------------------------------------------------------------------
+// CardContent — wraps injected content and controls pointer-event passthrough
+// ---------------------------------------------------------------------------
+const CardContent: React.FC<{
+  content: React.ReactNode;
+  interactive: boolean;
+}> = ({ content, interactive }) => (
+  <div
+    className="magic-bento-card__custom-content"
+    style={{
+      // When non-interactive, block pointer events so the card's GSAP
+      // handlers (tilt, magnetism, particles) receive all mouse events.
+      // When interactive, let events reach the injected subtree normally.
+      pointerEvents: interactive ? 'auto' : 'none',
+      position: 'relative',
+      zIndex: interactive ? 10 : 1,
+      width: '100%',
+      height: '100%',
+    }}
+  >
+    {content}
+  </div>
+);
+
+// ---------------------------------------------------------------------------
+// ParticleCard
+// ---------------------------------------------------------------------------
 const ParticleCard: React.FC<{
   children: React.ReactNode;
   className?: string;
@@ -201,7 +254,6 @@ const ParticleCard: React.FC<{
     if (disableAnimations || !cardRef.current) return;
 
     const element = cardRef.current;
-    
 
     const handleMouseEnter = () => {
       isHoveredRef.current = true;
@@ -307,10 +359,7 @@ const ParticleCard: React.FC<{
 
       gsap.fromTo(
         ripple,
-        {
-          scale: 0,
-          opacity: 1
-        },
+        { scale: 0, opacity: 1 },
         {
           scale: 1,
           opacity: 0,
@@ -347,6 +396,9 @@ const ParticleCard: React.FC<{
   );
 };
 
+// ---------------------------------------------------------------------------
+// GlobalSpotlight
+// ---------------------------------------------------------------------------
 const GlobalSpotlight: React.FC<{
   gridRef: React.RefObject<HTMLDivElement | null>;
   disableAnimations?: boolean;
@@ -402,11 +454,7 @@ const GlobalSpotlight: React.FC<{
       const cards = gridRef.current.querySelectorAll('.magic-bento-card');
 
       if (!mouseInside) {
-        gsap.to(spotlightRef.current, {
-          opacity: 0,
-          duration: 0.3,
-          ease: 'power2.out'
-        });
+        gsap.to(spotlightRef.current, { opacity: 0, duration: 0.3, ease: 'power2.out' });
         cards.forEach(card => {
           (card as HTMLElement).style.setProperty('--glow-intensity', '0');
         });
@@ -464,11 +512,7 @@ const GlobalSpotlight: React.FC<{
         (card as HTMLElement).style.setProperty('--glow-intensity', '0');
       });
       if (spotlightRef.current) {
-        gsap.to(spotlightRef.current, {
-          opacity: 0,
-          duration: 0.3,
-          ease: 'power2.out'
-        });
+        gsap.to(spotlightRef.current, { opacity: 0, duration: 0.3, ease: 'power2.out' });
       }
     };
 
@@ -485,6 +529,9 @@ const GlobalSpotlight: React.FC<{
   return null;
 };
 
+// ---------------------------------------------------------------------------
+// BentoCardGrid
+// ---------------------------------------------------------------------------
 const BentoCardGrid: React.FC<{
   children: React.ReactNode;
   gridRef?: React.RefObject<HTMLDivElement | null>;
@@ -494,21 +541,54 @@ const BentoCardGrid: React.FC<{
   </div>
 );
 
+// ---------------------------------------------------------------------------
+// Mobile detection hook
+// ---------------------------------------------------------------------------
 const useMobileDetection = () => {
   const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth <= MOBILE_BREAKPOINT);
-
     checkMobile();
     window.addEventListener('resize', checkMobile);
-
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
   return isMobile;
 };
 
+// ---------------------------------------------------------------------------
+// Shared inner layout — used by both the ParticleCard and plain-div paths
+// ---------------------------------------------------------------------------
+const CardInner: React.FC<{
+  card: BentoCardProps;
+}> = ({ card }) => {
+  const { label, title, description, content, contentInteractive = false } = card;
+
+  return (
+    <>
+      <div className="magic-bento-card__header">
+        <div className="magic-bento-card__label">{label}</div>
+      </div>
+
+      <div className="magic-bento-card__content">
+        {content ? (
+          // Render the injected content, gating pointer events via the wrapper
+          <CardContent content={content} interactive={contentInteractive} />
+        ) : (
+          <>
+            <h2 className="magic-bento-card__title">{title}</h2>
+            <p className="magic-bento-card__description">{description}</p>
+          </>
+        )}
+      </div>
+    </>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// MagicBento
+// ---------------------------------------------------------------------------
 const MagicBento: React.FC<BentoProps> = ({
   textAutoHide = true,
   enableStars = true,
@@ -541,20 +621,18 @@ const MagicBento: React.FC<BentoProps> = ({
       <BentoCardGrid gridRef={gridRef}>
         {cardData.map((card, index) => {
           const baseClassName = `magic-bento-card ${textAutoHide ? 'magic-bento-card--text-autohide' : ''} ${enableBorderGlow ? 'magic-bento-card--border-glow' : ''}`;
-          const cardProps = {
-            className: baseClassName,
-            style: {
-              backgroundColor: card.color,
-              '--glow-color': glowColor,
-              '--glow-rgb': card.glowRgb || glowColor
-            } as React.CSSProperties
-          };
+          const cardStyle = {
+            backgroundColor: card.color,
+            '--glow-color': glowColor,
+            '--glow-rgb': card.glowRgb || glowColor
+          } as React.CSSProperties;
 
           if (enableStars) {
             return (
               <ParticleCard
                 key={index}
-                {...cardProps}
+                className={baseClassName}
+                style={cardStyle}
                 disableAnimations={shouldDisableAnimations}
                 particleCount={particleCount}
                 glowColor={glowColor}
@@ -562,13 +640,7 @@ const MagicBento: React.FC<BentoProps> = ({
                 clickEffect={clickEffect}
                 enableMagnetism={enableMagnetism}
               >
-                <div className="magic-bento-card__header">
-                  <div className="magic-bento-card__label">{card.label}</div>
-                </div>
-                <div className="magic-bento-card__content">
-                  <h2 className="magic-bento-card__title">{card.title}</h2>
-                  <p className="magic-bento-card__description">{card.description}</p>
-                </div>
+                <CardInner card={card} />
               </ParticleCard>
             );
           }
@@ -576,7 +648,8 @@ const MagicBento: React.FC<BentoProps> = ({
           return (
             <div
               key={index}
-              {...cardProps}
+              className={baseClassName}
+              style={cardStyle}
               ref={el => {
                 if (!el) return;
 
@@ -590,11 +663,9 @@ const MagicBento: React.FC<BentoProps> = ({
                   const centerY = rect.height / 2;
 
                   if (enableTilt) {
-                    const rotateX = ((y - centerY) / centerY) * -10;
-                    const rotateY = ((x - centerX) / centerX) * 10;
                     gsap.to(el, {
-                      rotateX,
-                      rotateY,
+                      rotateX: ((y - centerY) / centerY) * -10,
+                      rotateY: ((x - centerX) / centerX) * 10,
                       duration: 0.1,
                       ease: 'power2.out',
                       transformPerspective: 1000
@@ -602,11 +673,9 @@ const MagicBento: React.FC<BentoProps> = ({
                   }
 
                   if (enableMagnetism) {
-                    const magnetX = (x - centerX) * 0.05;
-                    const magnetY = (y - centerY) * 0.05;
                     gsap.to(el, {
-                      x: magnetX,
-                      y: magnetY,
+                      x: (x - centerX) * 0.05,
+                      y: (y - centerY) * 0.05,
                       duration: 0.3,
                       ease: 'power2.out'
                     });
@@ -617,21 +686,11 @@ const MagicBento: React.FC<BentoProps> = ({
                   if (shouldDisableAnimations) return;
 
                   if (enableTilt) {
-                    gsap.to(el, {
-                      rotateX: 0,
-                      rotateY: 0,
-                      duration: 0.3,
-                      ease: 'power2.out'
-                    });
+                    gsap.to(el, { rotateX: 0, rotateY: 0, duration: 0.3, ease: 'power2.out' });
                   }
 
                   if (enableMagnetism) {
-                    gsap.to(el, {
-                      x: 0,
-                      y: 0,
-                      duration: 0.3,
-                      ease: 'power2.out'
-                    });
+                    gsap.to(el, { x: 0, y: 0, duration: 0.3, ease: 'power2.out' });
                   }
                 };
 
@@ -642,7 +701,6 @@ const MagicBento: React.FC<BentoProps> = ({
                   const x = e.clientX - rect.left;
                   const y = e.clientY - rect.top;
 
-                  // Calculate the maximum distance from click point to any corner
                   const maxDistance = Math.max(
                     Math.hypot(x, y),
                     Math.hypot(x - rect.width, y),
@@ -667,10 +725,7 @@ const MagicBento: React.FC<BentoProps> = ({
 
                   gsap.fromTo(
                     ripple,
-                    {
-                      scale: 0,
-                      opacity: 1
-                    },
+                    { scale: 0, opacity: 1 },
                     {
                       scale: 1,
                       opacity: 0,
@@ -686,13 +741,7 @@ const MagicBento: React.FC<BentoProps> = ({
                 el.addEventListener('click', handleClick);
               }}
             >
-              <div className="magic-bento-card__header">
-                <div className="magic-bento-card__label">{card.label}</div>
-              </div>
-              <div className="magic-bento-card__content">
-                <h2 className="magic-bento-card__title">{card.title}</h2>
-                <p className="magic-bento-card__description">{card.description}</p>
-              </div>
+              <CardInner card={card} />
             </div>
           );
         })}
