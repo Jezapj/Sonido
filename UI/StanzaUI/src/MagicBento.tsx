@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useCallback, useState } from 'react';
 import { gsap } from 'gsap';
 import './MagicBento.css';
+import CircularGallery from './CircularGallery'
 
 export interface BentoCardProps {
   color?: string;
@@ -52,6 +53,8 @@ function SubContent(){
   </div>
   )
 }
+
+
 const cardData: BentoCardProps[] = [
   {
     color: 'rgba(0, 0, 0, 0.92)',
@@ -76,6 +79,15 @@ const cardData: BentoCardProps[] = [
     title: 'Effects',
     description: 'Pedal selector',
     label: 'DSP',
+    content:
+  <div style={{ height: '190%', position: 'relative', top: '-20px', scale: '120%'}}>
+  <CircularGallery  textColor="#ffffff" scrollEase={0.3}
+  bend={1}
+  borderRadius={0.05}
+  scrollSpeed={7}
+/>
+</div>,
+
     glowRgb: '0, 255, 255',
     
     contentInteractive: true
