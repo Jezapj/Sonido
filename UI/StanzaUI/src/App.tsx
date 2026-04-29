@@ -210,9 +210,25 @@ function App() {
             <div style={{backgroundColor: "white", color: "white"}}></div>
             
             </MagicBento>
+            <div style={{scale: "90%", top: '16vh', right: '80px', position: 'absolute', zIndex: 1000}}>
+          <ModelViewer
+          url="https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/main/2.0/ToyCar/glTF-Binary/ToyCar.glb"
+          width={"15vw"}
+          height={"15vh"}
+          modelXOffset={0}
+          modelYOffset={0}
+          enableMouseParallax
+          enableHoverRotation
+          environmentPreset="forest"
+          fadeIn={true}
+          autoRotate={true}
+          autoRotateSpeed={0.35}
+          showScreenshotButton={false}
+        /></div>
+            <img style={{scale: "25%", top: '-18vh', right: '300px', position: 'absolute', zIndex: 1}} src="/STANZA_B_TP.png"/>
             <CircularText
   text={greetMsgRef.current}
-  onHover="speedUp"
+  onHover="speedUp" 
   spinDuration={20}
   className="custom-class"
 />
