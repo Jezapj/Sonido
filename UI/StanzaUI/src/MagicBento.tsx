@@ -2,7 +2,7 @@ import React, { useRef, useEffect, useCallback, useState } from 'react';
 import { gsap } from 'gsap';
 import './MagicBento.css';
 import CircularGallery from './CircularGallery'
-
+import RustStreamExample from './RustStreamExample';
 export interface BentoCardProps {
   color?: string;
   title?: string;
@@ -45,11 +45,21 @@ const DEFAULT_SPOTLIGHT_RADIUS = 300;
 const DEFAULT_GLOW_COLOR = '255, 0, 0';
 const MOBILE_BREAKPOINT = 768;
 
-function SubContent(){
+function DashBoardContent(){
   return (<div style={{position: 'absolute', bottom: '10px', left: '10px', color: 'white'}}>
-    <h3>Subcontent</h3>
-    <p>This content is injected into the card and can be interactive.</p>
-    <button onClick={() => alert('Button inside card clicked!')}>Click Me</button>
+    <h3>Not Connected</h3>
+    <p>Click below to connect to the StanzaBoard</p>
+    <button onClick={() => alert('Button inside card clicked!')}>Connect</button>
+  </div>
+  )
+}
+
+function PresetContent(){
+  return (<div style={{position: 'absolute', bottom: '10px', left: '10px', color: 'white'}}>
+    <h3>Save/Load Presets</h3>
+    <p>Export your setups or import a prexisting one</p>
+    <button onClick={() => alert('Button inside card clicked!')}>Save</button>
+    <button onClick={() => alert('Button inside card clicked!')}>Load</button>
   </div>
   )
 }
@@ -62,7 +72,7 @@ const cardData: BentoCardProps[] = [
     description: 'Centralized data view',
     label: 'Dashboard',
     glowRgb: '132, 0, 255',
-    content: <SubContent />,
+    content: <DashBoardContent />,
     contentInteractive: true
   },
   {
@@ -71,7 +81,9 @@ const cardData: BentoCardProps[] = [
     description: 'Waveform analysis',
     label: 'Waveform',
     glowRgb: '0, 0, 255',
-    content: <SubContent />,
+    content: <div style={{ height: '100%', position: 'relative', top: '-75px', scale: '80%'}}>
+      <RustStreamExample />
+      </div>,
     contentInteractive: true
   },
   {
@@ -98,7 +110,7 @@ const cardData: BentoCardProps[] = [
     description: 'Streamline workflows',
     label: 'Presets',
     glowRgb: '255, 0, 255',
-    content: <SubContent />,
+    content: <PresetContent />,
     contentInteractive: true
   },
 ];

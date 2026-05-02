@@ -8,3 +8,7 @@
 .circular-gallery:active {
   cursor: grabbing;
 }
+
+.circular-gallery > img {
+  color: blueviolet;
+}

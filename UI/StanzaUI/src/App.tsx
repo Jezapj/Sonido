@@ -225,7 +225,7 @@ function App() {
           autoRotateSpeed={0.35}
           showScreenshotButton={false}
         /></div>
-            <img style={{scale: "25%", top: '-18vh', right: '300px', position: 'absolute', zIndex: 1}} src="/STANZA_B_TP.png"/>
+            <img style={{scale: "25%", top: '-18vh', right: '17%', position: 'absolute', zIndex: 1}} src="/STANZA_B_TP.png"/>
             <CircularText
   text={greetMsgRef.current}
   onHover="speedUp" 
