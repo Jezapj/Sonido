@@ -3,6 +3,7 @@ import { gsap } from 'gsap';
 import './MagicBento.css';
 import CircularGallery from './CircularGallery'
 import RustStreamExample from './RustStreamExample';
+import DashboardAudio from './DashboardAudio';
 export interface BentoCardProps {
   color?: string;
   title?: string;
@@ -72,7 +73,8 @@ const cardData: BentoCardProps[] = [
     description: 'Centralized data view',
     label: 'Dashboard',
     glowRgb: '132, 0, 255',
-    content: <DashBoardContent />,
+    content: <div style={{ height: '100%', position: 'relative', top: '0', scale: '100%'}}>
+      <DashboardAudio /></div>,
     contentInteractive: true
   },
   {
@@ -91,6 +93,7 @@ const cardData: BentoCardProps[] = [
     title: 'Effects',
     description: 'Pedal selector',
     label: 'DSP',
+    
     content:
   <div style={{ height: '190%', position: 'relative', top: '-20px', scale: '120%'}}>
   <CircularGallery  textColor="#ffffff" scrollEase={0.3}

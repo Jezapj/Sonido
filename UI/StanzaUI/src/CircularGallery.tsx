@@ -1,5 +1,6 @@
 import { Camera, Mesh, Plane, Program, Renderer, Texture, Transform } from 'ogl';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import PedalOverlay from './PedalOverlay';
 
 import './CircularGallery.css';
 
@@ -185,20 +186,8 @@ class Media {
   isAfter: boolean = false;
 
   constructor({
-    geometry,
-    gl,
-    image,
-    index,
-    length,
-    renderer,
-    scene,
-    screen,
-    text,
-    viewport,
-    bend,
-    textColor,
-    borderRadius = 0,
-    font
+    geometry, gl, image, index, length, renderer, scene,
+    screen, text, viewport, bend, textColor, borderRadius = 0, font
   }: MediaProps) {
     this.geometry = geometry;
     this.gl = gl;
@@ -221,9 +210,7 @@ class Media {
   }
 
   createShader() {
-    const texture = new Texture(this.gl, {
-      generateMipmaps: true
-    });
+    const texture = new Texture(this.gl, { generateMipmaps: true });
     this.program = new Program(this.gl, {
       depthTest: false,
       depthWrite: false,
@@ -266,12 +253,8 @@ class Media {
             vUv.y * ratio.y + (1.0 - ratio.y) * 0.5
           );
           vec4 color = texture2D(tMap, uv);
-          
           float d = roundedBoxSDF(vUv - 0.5, vec2(0.5 - uBorderRadius), uBorderRadius);
-          
-          float edgeSmooth = 0.002;
-          float alpha = 1.0 - smoothstep(-edgeSmooth, edgeSmooth, d);
-          
+          float alpha = 1.0 - smoothstep(-0.002, 0.002, d);
           gl_FragColor = vec4(color.rgb, alpha);
         }
       `,
@@ -295,21 +278,14 @@ class Media {
   }
 
   createMesh() {
-    this.plane = new Mesh(this.gl, {
-      geometry: this.geometry,
-      program: this.program
-    });
+    this.plane = new Mesh(this.gl, { geometry: this.geometry, program: this.program });
     this.plane.setParent(this.scene);
   }
 
   createTitle() {
     this.title = new Title({
-      gl: this.gl,
-      plane: this.plane,
-      renderer: this.renderer,
-      text: this.text,
-      textColor: this.textColor,
-      font: this.font
+      gl: this.gl, plane: this.plane, renderer: this.renderer,
+      text: this.text, textColor: this.textColor, font: this.font
     });
   }
 
@@ -326,7 +302,6 @@ class Media {
       const B_abs = Math.abs(this.bend);
       const R = (H * H + B_abs * B_abs) / (2 * B_abs);
       const effectiveX = Math.min(Math.abs(x), H);
-
       const arc = R - Math.sqrt(R * R - effectiveX * effectiveX);
       if (this.bend > 0) {
         this.plane.position.y = -arc;
@@ -374,34 +349,43 @@ class Media {
   }
 }
 
+// ─── GalleryItem type ──────────────────────────────────────────────────────────
+
+export interface GalleryItem {
+  image: string;
+  text: string;
+}
+
 interface AppConfig {
-  items?: { image: string; text: string }[];
+  items?: GalleryItem[];
   bend?: number;
   textColor?: string;
   borderRadius?: number;
   font?: string;
   scrollSpeed?: number;
   scrollEase?: number;
+  onCardClick?: (item: GalleryItem) => void;
 }
 
 class App {
   container: HTMLElement;
   scrollSpeed: number;
-  scroll: {
-    ease: number;
-    current: number;
-    target: number;
-    last: number;
-    position?: number;
-  };
+  scroll: { ease: number; current: number; target: number; last: number; position?: number };
   onCheckDebounce: (...args: any[]) => void;
+  onCardClick?: (item: GalleryItem) => void;
+
+  // Click detection
+  startX: number = 0;
+  startY: number = 0;
+  lastX:  number = 0;
+
   renderer!: Renderer;
   gl!: GL;
   camera!: Camera;
   scene!: Transform;
   planeGeometry!: Plane;
   medias: Media[] = [];
-  mediasImages: { image: string; text: string }[] = [];
+  mediasImages: GalleryItem[] = [];
   screen!: { width: number; height: number };
   viewport!: { width: number; height: number };
   raf: number = 0;
@@ -418,19 +402,16 @@ class App {
   constructor(
     container: HTMLElement,
     {
-      items,
-      bend = 1,
-      textColor = '#ffffff',
-      borderRadius = 0,
-      font = 'bold 30px Figtree',
-      scrollSpeed = 2,
-      scrollEase = 0.05
+      items, bend = 1, textColor = '#ffffff', borderRadius = 0,
+      font = 'bold 30px Figtree', scrollSpeed = 2, scrollEase = 0.05,
+      onCardClick
     }: AppConfig
   ) {
     document.documentElement.classList.remove('no-js');
     this.container = container;
     this.scrollSpeed = scrollSpeed;
     this.scroll = { ease: scrollEase, current: 0, target: 0, last: 0 };
+    this.onCardClick = onCardClick;
     this.onCheckDebounce = debounce(this.onCheck.bind(this), 200);
     this.createRenderer();
     this.createCamera();
@@ -443,11 +424,7 @@ class App {
   }
 
   createRenderer() {
-    this.renderer = new Renderer({
-      alpha: true,
-      antialias: true,
-      dpr: Math.min(window.devicePixelRatio || 1, 2)
-    });
+    this.renderer = new Renderer({ alpha: true, antialias: true, dpr: Math.min(window.devicePixelRatio || 1, 2) });
     this.gl = this.renderer.gl;
     this.gl.clearColor(0, 0, 0, 0);
     this.container.appendChild(this.renderer.gl.canvas as HTMLCanvasElement);
@@ -464,106 +441,114 @@ class App {
   }
 
   createGeometry() {
-    this.planeGeometry = new Plane(this.gl, {
-      heightSegments: 50,
-      widthSegments: 100
-    });
+    this.planeGeometry = new Plane(this.gl, { heightSegments: 50, widthSegments: 100 });
   }
 
   createMedias(
-    items: { image: string; text: string }[] | undefined,
-    bend: number = 1,
-    textColor: string,
-    borderRadius: number,
-    font: string
+    items: GalleryItem[] | undefined,
+    bend: number = 1, textColor: string,
+    borderRadius: number, font: string
   ) {
-    const defaultItems = [
-      {
-        image: `https://picsum.photos/seed/1/800/600`,
-        text: 'Bridge'
-      },
-      {
-        image: `https://picsum.photos/seed/2/800/600`,
-        text: 'Desk Setup'
-      },
-      {
-        image: `https://picsum.photos/seed/3/800/600`,
-        text: 'Waterfall'
-      },
-      {
-        image: `https://picsum.photos/seed/4/800/600`,
-        text: 'Strawberries'
-      },
-      {
-        image: `https://picsum.photos/seed/5/800/600`,
-        text: 'Deep Diving'
-      },
-      {
-        image: `https://picsum.photos/seed/16/800/600`,
-        text: 'Train Track'
-      },
-      {
-        image: `https://picsum.photos/seed/17/800/600`,
-        text: 'Santorini'
-      },
-      {
-        image: `https://picsum.photos/seed/8/800/600`,
-        text: 'Blurry Lights'
-      },
-      {
-        image: `https://picsum.photos/seed/9/800/600`,
-        text: 'New York'
-      },
-      {
-        image: `https://picsum.photos/seed/10/800/600`,
-        text: 'Good Boy'
-      },
-      {
-        image: `https://picsum.photos/seed/21/800/600`,
-        text: 'Coastline'
-      },
-      {
-        image: `https://picsum.photos/seed/12/800/600`,
-        text: 'Palm Trees'
-      }
+    const defaultItems: GalleryItem[] = [
+      { image: `https://picsum.photos/seed/1/800/600`,  text: 'Bridge' },
+      { image: `https://picsum.photos/seed/2/800/600`,  text: 'Desk Setup' },
+      { image: `https://picsum.photos/seed/3/800/600`,  text: 'Waterfall' },
+      { image: `https://picsum.photos/seed/4/800/600`,  text: 'Strawberries' },
+      { image: `https://picsum.photos/seed/5/800/600`,  text: 'Deep Diving' },
+      { image: `https://picsum.photos/seed/16/800/600`, text: 'Train Track' },
+      { image: `https://picsum.photos/seed/17/800/600`, text: 'Santorini' },
+      { image: `https://picsum.photos/seed/8/800/600`,  text: 'Blurry Lights' },
+      { image: `https://picsum.photos/seed/9/800/600`,  text: 'New York' },
+      { image: `https://picsum.photos/seed/10/800/600`, text: 'Good Boy' },
+      { image: `https://picsum.photos/seed/21/800/600`, text: 'Coastline' },
+      { image: `https://picsum.photos/seed/12/800/600`, text: 'Palm Trees' },
     ];
     const galleryItems = items && items.length ? items : defaultItems;
     this.mediasImages = galleryItems.concat(galleryItems);
-    this.medias = this.mediasImages.map((data, index) => {
-      return new Media({
-        geometry: this.planeGeometry,
-        gl: this.gl,
-        image: data.image,
-        index,
-        length: this.mediasImages.length,
-        renderer: this.renderer,
-        scene: this.scene,
-        screen: this.screen,
-        text: data.text,
-        viewport: this.viewport,
-        bend,
-        textColor,
-        borderRadius,
-        font
-      });
-    });
+    this.medias = this.mediasImages.map((data, index) =>
+      new Media({
+        geometry: this.planeGeometry, gl: this.gl, image: data.image,
+        index, length: this.mediasImages.length, renderer: this.renderer,
+        scene: this.scene, screen: this.screen, text: data.text,
+        viewport: this.viewport, bend, textColor, borderRadius, font
+      })
+    );
   }
+
+  // ─── Click detection ─────────────────────────────────────────────────────────
+
+  /** Convert a viewport-space clientX to the world X that matches OGL plane positions */
+  private screenToWorldX(clientX: number): number {
+    const canvas = this.renderer.gl.canvas as HTMLCanvasElement;
+    const rect = canvas.getBoundingClientRect();
+    const relativeX = clientX - rect.left;
+    // Map [0, screen.width] → [-viewport.width/2, +viewport.width/2]
+    return (relativeX / this.screen.width - 0.5) * this.viewport.width;
+  }
+
+  /** Returns the GalleryItem whose plane is closest to the clicked screen position */
+  private findClickedItem(clientX: number, clientY: number): GalleryItem | null {
+    const canvas = this.renderer.gl.canvas as HTMLCanvasElement;
+    const rect = canvas.getBoundingClientRect();
+
+    // Ignore clicks outside the canvas
+    if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) {
+      return null;
+    }
+
+    const worldX = this.screenToWorldX(clientX) -7;
+
+    let closest: Media | null = null;
+    let minDist = Infinity;
+
+    for (const media of this.medias) {
+      const dist = Math.abs(media.plane.position.x - worldX);
+      // Only consider if the click falls within the plane's half-width
+      if (dist < media.plane.scale.x / 2 && dist < minDist) {
+        minDist = dist;
+        closest = media;
+      }
+    }
+
+    if (!closest) return null;
+    // mediasImages is doubled; index maps directly
+    return this.mediasImages[closest.index] ?? null;
+  }
+
+  // ─── Input handlers ───────────────────────────────────────────────────────────
 
   onTouchDown(e: MouseEvent | TouchEvent) {
     this.isDown = true;
     this.scroll.position = this.scroll.current;
-    this.start = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+    this.start  = clientX;
+    this.startX = clientX;
+    this.startY = clientY;
+    this.lastX  = clientX;
   }
 
   onTouchMove(e: MouseEvent | TouchEvent) {
     if (!this.isDown) return;
     const x = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    this.lastX = x;
     const distance = (this.start - x) * (this.scrollSpeed * 0.025);
     this.scroll.target = (this.scroll.position ?? 0) + distance;
   }
 
   onTouchUp() {
+    const moved = Math.abs(this.lastX - this.startX);
     this.isDown = false;
+
+    // Treat as a tap/click if movement was tiny
+    if (moved < 6 && this.onCardClick) {
+      const item = this.findClickedItem(this.startX, this.startY);
+      if (item) {
+        this.onCardClick(item);
+        return; // skip scroll snap on click
+      }
+    }
+
     this.onCheck();
   }
 
@@ -583,14 +568,9 @@ class App {
   }
 
   onResize() {
-    this.screen = {
-      width: this.container.clientWidth,
-      height: this.container.clientHeight
-    };
+    this.screen = { width: this.container.clientWidth, height: this.container.clientHeight };
     this.renderer.setSize(this.screen.width, this.screen.height);
-    this.camera.perspective({
-      aspect: this.screen.width / this.screen.height
-    });
+    this.camera.perspective({ aspect: this.screen.width / this.screen.height });
     const fov = (this.camera.fov * Math.PI) / 180;
     const height = 2 * Math.tan(fov / 2) * this.camera.position.z;
     const width = height * this.camera.aspect;
@@ -612,41 +592,43 @@ class App {
   }
 
   addEventListeners() {
-    this.boundOnResize = this.onResize.bind(this);
-    this.boundOnWheel = this.onWheel.bind(this);
+    this.boundOnResize    = this.onResize.bind(this);
+    this.boundOnWheel     = this.onWheel.bind(this);
     this.boundOnTouchDown = this.onTouchDown.bind(this);
     this.boundOnTouchMove = this.onTouchMove.bind(this);
-    this.boundOnTouchUp = this.onTouchUp.bind(this);
-    window.addEventListener('resize', this.boundOnResize);
+    this.boundOnTouchUp   = this.onTouchUp.bind(this);
+    window.addEventListener('resize',     this.boundOnResize);
     window.addEventListener('mousewheel', this.boundOnWheel);
-    window.addEventListener('wheel', this.boundOnWheel);
-    window.addEventListener('mousedown', this.boundOnTouchDown);
-    window.addEventListener('mousemove', this.boundOnTouchMove);
-    window.addEventListener('mouseup', this.boundOnTouchUp);
+    window.addEventListener('wheel',      this.boundOnWheel);
+    window.addEventListener('mousedown',  this.boundOnTouchDown);
+    window.addEventListener('mousemove',  this.boundOnTouchMove);
+    window.addEventListener('mouseup',    this.boundOnTouchUp);
     window.addEventListener('touchstart', this.boundOnTouchDown);
-    window.addEventListener('touchmove', this.boundOnTouchMove);
-    window.addEventListener('touchend', this.boundOnTouchUp);
+    window.addEventListener('touchmove',  this.boundOnTouchMove);
+    window.addEventListener('touchend',   this.boundOnTouchUp);
   }
 
   destroy() {
     window.cancelAnimationFrame(this.raf);
-    window.removeEventListener('resize', this.boundOnResize);
+    window.removeEventListener('resize',     this.boundOnResize);
     window.removeEventListener('mousewheel', this.boundOnWheel);
-    window.removeEventListener('wheel', this.boundOnWheel);
-    window.removeEventListener('mousedown', this.boundOnTouchDown);
-    window.removeEventListener('mousemove', this.boundOnTouchMove);
-    window.removeEventListener('mouseup', this.boundOnTouchUp);
+    window.removeEventListener('wheel',      this.boundOnWheel);
+    window.removeEventListener('mousedown',  this.boundOnTouchDown);
+    window.removeEventListener('mousemove',  this.boundOnTouchMove);
+    window.removeEventListener('mouseup',    this.boundOnTouchUp);
     window.removeEventListener('touchstart', this.boundOnTouchDown);
-    window.removeEventListener('touchmove', this.boundOnTouchMove);
-    window.removeEventListener('touchend', this.boundOnTouchUp);
-    if (this.renderer && this.renderer.gl && this.renderer.gl.canvas.parentNode) {
+    window.removeEventListener('touchmove',  this.boundOnTouchMove);
+    window.removeEventListener('touchend',   this.boundOnTouchUp);
+    if (this.renderer?.gl?.canvas?.parentNode) {
       this.renderer.gl.canvas.parentNode.removeChild(this.renderer.gl.canvas as HTMLCanvasElement);
     }
   }
 }
 
+// ─── React component ──────────────────────────────────────────────────────────
+
 interface CircularGalleryProps {
-  items?: { image: string; text: string }[];
+  items?: GalleryItem[];
   bend?: number;
   textColor?: string;
   borderRadius?: number;
@@ -656,29 +638,31 @@ interface CircularGalleryProps {
 }
 
 export default function CircularGallery({
-  items,
-  bend = 3,
-  textColor = '#ffffff',
-  borderRadius = 0.05,
-  font = 'bold 30px Figtree',
-  scrollSpeed = 2,
-  scrollEase = 0.05
+  items, bend = 3, textColor = '#ffffff',
+  borderRadius = 0.05, font = 'bold 30px Figtree',
+  scrollSpeed = 2, scrollEase = 0.05
 }: CircularGalleryProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const [clickedItem, setClickedItem] = useState<GalleryItem | null>(null);
+
   useEffect(() => {
     if (!containerRef.current) return;
     const app = new App(containerRef.current, {
-      items,
-      bend,
-      textColor,
-      borderRadius,
-      font,
-      scrollSpeed,
-      scrollEase
+      items, bend, textColor, borderRadius, font, scrollSpeed, scrollEase,
+      onCardClick: item => setClickedItem(item),
     });
-    return () => {
-      app.destroy();
-    };
+    return () => app.destroy();
   }, [items, bend, textColor, borderRadius, font, scrollSpeed, scrollEase]);
-  return <div className="circular-gallery" ref={containerRef} />;
+
+  return (
+    <>
+      <div className="circular-gallery" ref={containerRef} />
+      {clickedItem && (
+        <PedalOverlay
+          item={clickedItem}
+          onClose={() => setClickedItem(null)}
+        />
+      )}
+    </>
+  );
 }
