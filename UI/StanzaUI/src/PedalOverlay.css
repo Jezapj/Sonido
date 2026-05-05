@@ -1,53 +1,50 @@
-/* ─── Overlay backdrop ──────────────────────────────────────────────────────── */
+/* ─── Overlay ────────────────────────────────────────────────────────────────── */
 
 .po-overlay {
   position: fixed;
   inset: 0;
   z-index: 2000;
-  background: rgba(0, 0, 0, 0.75);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: rgba(0, 0, 0, 0.78);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  top: -33vh;
   display: flex;
   align-items: center;
   justify-content: center;
-  scale: 80%;
+  scale: 100%;
 }
 
 /* ─── Panel ──────────────────────────────────────────────────────────────────── */
 
 .po-panel {
-  position: relative;
   display: flex;
   flex-direction: column;
-  width: min(820px, 92vw);
-  max-height: 88vh;
+  width: min(860px, 90vw);
+  /* Fill up to 88vh but never require scrolling — content scales to fit */
+  height: 30vh;
   background: #0d0b12;
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 20px;
-  overflow: hidden;
-  overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.07) transparent;
-  box-shadow: 0 40px 100px rgba(0, 0, 0, 0.8);
+  overflow: hidden;           /* no scrollbar ever shown */
+  box-shadow: 0 40px 100px rgba(0, 0, 0, 0.85);
 }
 
 /* ─── Header ─────────────────────────────────────────────────────────────────── */
 
 .po-header {
-  position: relative;
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 1.25rem;
-  padding: 1.5rem 1.75rem;
+  gap: 1rem;
+  padding: 1.25rem 1.5rem;
   background: #100e18;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   flex-shrink: 0;
 }
 
-.po-header__image {
-  width: 64px;
-  height: 64px;
+.po-header__img {
+  width: 54px;
+  height: 54px;
   border-radius: 10px;
   background-size: cover;
   background-position: center;
@@ -58,7 +55,9 @@
 .po-header__text {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
 }
 
 .po-header__tag {
@@ -66,103 +65,133 @@
   letter-spacing: 0.1em;
   text-transform: uppercase;
   font-weight: 600;
-  color: rgba(180, 140, 255, 0.55);
+  color: rgba(180, 140, 255, 0.5);
 }
 
 .po-header__title {
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 700;
   color: rgba(255, 255, 255, 0.92);
   margin: 0;
   letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
+/* ─── On / Off toggle ────────────────────────────────────────────────────────── */
+
+.po-toggle {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px 5px 8px;
+  border-radius: 999px;
+  border: 1px solid;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  transition: background 0.2s ease, border-color 0.2s ease;
+  flex-shrink: 0;
+}
+
+.po-toggle--on {
+  background: rgba(34, 197, 94, 0.12);
+  border-color: rgba(34, 197, 94, 0.35);
+  color: #22c55e;
+}
+
+.po-toggle--off {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: #ef4444;
+}
+
+.po-toggle__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.po-toggle--on  .po-toggle__dot { background: #22c55e; box-shadow: 0 0 6px #22c55e; }
+.po-toggle--off .po-toggle__dot { background: #ef4444; box-shadow: 0 0 6px #ef4444; }
+
+/* ─── Close button ───────────────────────────────────────────────────────────── */
+
 .po-close {
-  position: absolute;
-  top: 1.1rem;
-  right: 1.1rem;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 50%;
-  width: 30px;
-  height: 30px;
+  width: 28px;
+  height: 28px;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.4);
-  transition: background 0.15s ease, color 0.15s ease;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.35);
+  flex-shrink: 0;
   line-height: 1;
+  transition: background 0.15s, color 0.15s;
 }
 
 .po-close:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.12);
   color: rgba(255, 255, 255, 0.8);
 }
 
-/* ─── Body ───────────────────────────────────────────────────────────────────── */
+/* ─── Body — knob area ───────────────────────────────────────────────────────── */
 
 .po-body {
+  flex: 1;
   display: flex;
   flex-direction: column;
+  justify-content: center;
+  padding: 1.5rem 1.75rem 0.75rem;
+  transition: opacity 0.2s ease;
 }
 
-/* ─── Section ─────────────────────────────────────────────────────────────────── */
-
-.po-section {
-  padding: 1.25rem 1.75rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+.po-body--disabled {
+  opacity: 0.35;
+  pointer-events: none;
 }
 
-.po-section__title {
-  font-size: 10px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  font-weight: 600;
-  color: rgba(180, 140, 255, 0.38);
-  margin-bottom: 1.1rem;
-}
+/* ─── Knobs grid — wraps automatically, centred ──────────────────────────────── */
 
-.po-row {
+.po-knobs-grid {
   display: flex;
   flex-direction: row;
-  align-items: flex-start;
-  gap: 2rem;
   flex-wrap: wrap;
-}
-
-/* ─── Band column ─────────────────────────────────────────────────────────────── */
-
-.po-band {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.po-band__label {
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.2);
-}
-
-.po-band__knobs {
-  display: flex;
-  flex-direction: row;
-  gap: 0.75rem;
+  gap: 1.25rem 1.75rem;
+  justify-content: center;
   align-items: flex-start;
 }
 
-/* ─── Knob ───────────────────────────────────────────────────────────────────── */
+/* ─── Hint ───────────────────────────────────────────────────────────────────── */
+
+.po-hint {
+  padding: 0.6rem 1.75rem 1rem;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.14);
+  letter-spacing: 0.04em;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+/* ─── Individual knob ────────────────────────────────────────────────────────── */
 
 .po-knob {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
+}
+
+.po-knob--disabled .po-knob__svg {
+  pointer-events: none;
 }
 
 .po-knob__svg {
@@ -187,42 +216,16 @@
   color: rgba(255, 255, 255, 0.65);
   letter-spacing: 0.02em;
   font-variant-numeric: tabular-nums;
-  min-width: 38px;
+  min-width: 40px;
   text-align: center;
 }
 
-/* ─── Hint footer ─────────────────────────────────────────────────────────────── */
-
-.po-hint {
-  padding: 0.9rem 1.75rem 1.2rem;
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.16);
-  letter-spacing: 0.04em;
-  text-align: center;
-  flex-shrink: 0;
-}
-
-/* ─── Responsive ──────────────────────────────────────────────────────────────── */
+/* ─── Responsive ─────────────────────────────────────────────────────────────── */
 
 @media (max-width: 600px) {
-  .po-header {
-    padding: 1.1rem 1.1rem;
-  }
-
-  .po-header__image {
-    width: 48px;
-    height: 48px;
-  }
-
-  .po-header__title {
-    font-size: 18px;
-  }
-
-  .po-section {
-    padding: 1rem 1.1rem;
-  }
-
-  .po-row {
-    gap: 1.25rem;
-  }
+  .po-header { padding: 1rem; }
+  .po-header__img { width: 42px; height: 42px; }
+  .po-header__title { font-size: 17px; }
+  .po-body { padding: 1rem 1rem 0.5rem; }
+  .po-knobs-grid { gap: 1rem; }
 }

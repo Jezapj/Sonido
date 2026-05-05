@@ -19,7 +19,9 @@ async fn stream_audio(app: tauri::AppHandle) {
             let chunk: Vec<f32> = (0..chunk_size)
                 .map(|i| {
                     let t = (sample_clock + i) as f32 / sample_rate;
-                    (2.0 * std::f32::consts::PI * 440.0 * t).sin()
+                    (2.0 * std::f32::consts::PI * 82.0 * t).sin() +
+                    (2.0 * std::f32::consts::PI * 880.0 * t).sin() * 0.5 + 
+                    (2.0 * std::f32::consts::PI * 4500.0 * t).sin() * 0.65
                 })
                 .collect();
 
