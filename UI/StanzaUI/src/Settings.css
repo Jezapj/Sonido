@@ -1,0 +1,397 @@
+.settings-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100vh;
+  box-sizing: border-box;
+}
+
+.settings-panel {
+  background: #120F17;
+  border: 1px solid #2F293A;
+  border-radius: 24px;
+  width: min(480px, 92vw);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow:
+    0 0 0 1px rgba(132, 0, 255, 0.08),
+    0 40px 80px rgba(0, 0, 0, 0.65);
+  position: relative;
+}
+
+.settings-panel::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 10%; right: 10%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(132, 0, 255, 0.6), transparent);
+  pointer-events: none;
+}
+
+/* ── Header ── */
+.settings-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1.5rem 1.75rem 1.25rem;
+  border-bottom: 1px solid #2F293A;
+  flex-shrink: 0;
+}
+
+.settings-header__icon {
+  font-size: 1.5rem;
+  width: 44px;
+  height: 44px;
+  background: rgba(132, 0, 255, 0.12);
+  border: 1px solid rgba(132, 0, 255, 0.25);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(180, 140, 255, 0.9);
+  flex-shrink: 0;
+}
+
+.settings-header__title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: -0.01em;
+}
+
+.settings-header__sub {
+  margin: 2px 0 0;
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.3);
+  letter-spacing: 0.03em;
+}
+
+.settings-header__user {
+  color: rgba(180, 140, 255, 0.7);
+  font-family: 'Courier New', monospace;
+  font-weight: 600;
+}
+
+/* ── Scroll area ── */
+.settings-scroll {
+  overflow-y: auto;
+  flex: 1;
+  padding: 0.75rem 0 1.25rem;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(132, 0, 255, 0.3) transparent;
+}
+
+.settings-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+
+.settings-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.settings-scroll::-webkit-scrollbar-thumb {
+  background: rgba(132, 0, 255, 0.3);
+  border-radius: 4px;
+}
+
+/* ── Section ── */
+.settings-section {
+  padding: 0.75rem 1.75rem;
+}
+
+.settings-section + .settings-section {
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.settings-section-title {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: rgba(255, 255, 255, 0.22);
+  font-weight: 600;
+  margin: 0 0 0.75rem;
+}
+
+.settings-section-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* ── Toggle row ── */
+.settings-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.7rem 0;
+  cursor: pointer;
+  gap: 1rem;
+  border-radius: 8px;
+  transition: background 0.15s;
+}
+
+.settings-toggle-row:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.settings-toggle-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-toggle-label {
+  font-size: 0.88rem;
+  color: rgba(255, 255, 255, 0.8);
+  font-weight: 500;
+}
+
+.settings-toggle-desc {
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.28);
+  letter-spacing: 0.02em;
+}
+
+/* the pill toggle */
+.settings-toggle {
+  width: 44px;
+  height: 24px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  position: relative;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.2s, border-color 0.2s, box-shadow 0.2s;
+}
+
+.settings-toggle--on {
+  background: var(--toggle-accent);
+  border-color: var(--toggle-accent);
+  box-shadow: 0 0 12px var(--toggle-glow);
+}
+
+.settings-toggle__thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.5);
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.2s;
+}
+
+.settings-toggle--on .settings-toggle__thumb {
+  transform: translateX(20px);
+  background: #fff;
+}
+
+/* ── Theme picker ── */
+.settings-theme-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.7rem 0;
+  gap: 1rem;
+}
+
+.settings-theme-picker {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.settings-theme-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 5px 12px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  letter-spacing: 0.03em;
+}
+
+.settings-theme-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.settings-theme-btn--active {
+  background: rgba(132, 0, 255, 0.18);
+  border-color: rgba(132, 0, 255, 0.5);
+  color: rgba(200, 160, 255, 1);
+  box-shadow: 0 0 10px rgba(132, 0, 255, 0.15);
+}
+
+.settings-theme-btn__swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.settings-theme-btn__swatch--dark {
+  background: linear-gradient(135deg, #120F17, #2F293A);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.settings-theme-btn__swatch--light {
+  background: linear-gradient(135deg, #f0edf5, #d4c8e8);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+/* ── Slider row ── */
+.settings-slider-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.7rem 0;
+  gap: 1rem;
+}
+
+.settings-slider-right {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-shrink: 0;
+}
+
+.settings-slider-value {
+  font-size: 0.78rem;
+  font-family: 'Courier New', monospace;
+  color: rgba(180, 140, 255, 0.8);
+  min-width: 44px;
+  text-align: right;
+}
+
+.settings-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100px;
+  height: 3px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  outline: none;
+  cursor: pointer;
+}
+
+.settings-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: rgba(180, 140, 255, 1);
+  box-shadow: 0 0 8px rgba(132, 0, 255, 0.5);
+  cursor: pointer;
+  border: none;
+  transition: transform 0.15s;
+}
+
+.settings-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+
+/* ── Info rows ── */
+.settings-info-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.55rem 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.settings-info-row:last-child {
+  border-bottom: none;
+}
+
+.settings-info-label {
+  font-size: 0.82rem;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.settings-info-value {
+  font-size: 0.82rem;
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.settings-info-value--mono {
+  font-family: 'Courier New', monospace;
+  color: rgba(180, 140, 255, 0.7);
+}
+
+/* ─── Light theme overrides ─────────────────────────── */
+[data-theme="light"] .settings-panel {
+  background: #f0edf5;
+  border-color: #d4c8e8;
+  box-shadow: 0 0 0 1px rgba(132, 0, 255, 0.08), 0 40px 80px rgba(132, 0, 255, 0.1);
+}
+
+[data-theme="light"] .settings-header {
+  border-bottom-color: #d4c8e8;
+}
+
+[data-theme="light"] .settings-header__title {
+  color: #1a0f2e;
+}
+
+[data-theme="light"] .settings-section-title {
+  color: rgba(26, 15, 46, 0.35);
+}
+
+[data-theme="light"] .settings-toggle-label {
+  color: rgba(26, 15, 46, 0.85);
+}
+
+[data-theme="light"] .settings-toggle-desc {
+  color: rgba(26, 15, 46, 0.35);
+}
+
+[data-theme="light"] .settings-toggle {
+  background: rgba(0, 0, 0, 0.08);
+  border-color: rgba(0, 0, 0, 0.12);
+}
+
+[data-theme="light"] .settings-theme-btn {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: rgba(0, 0, 0, 0.1);
+  color: rgba(26, 15, 46, 0.45);
+}
+
+[data-theme="light"] .settings-theme-btn:hover {
+  background: rgba(0, 0, 0, 0.08);
+  color: rgba(26, 15, 46, 0.75);
+}
+
+[data-theme="light"] .settings-info-label {
+  color: rgba(26, 15, 46, 0.4);
+}
+
+[data-theme="light"] .settings-info-value {
+  color: rgba(26, 15, 46, 0.7);
+}
+
+[data-theme="light"] .settings-section + .settings-section {
+  border-top-color: rgba(0, 0, 0, 0.06);
+}
+
+[data-theme="light"] .settings-info-row {
+  border-bottom-color: rgba(0, 0, 0, 0.05);
+}
+
+[data-theme="light"] .settings-slider {
+  background: rgba(0, 0, 0, 0.1);
+}
+
+[data-theme="light"] .settings-scroll {
+  scrollbar-color: rgba(132, 0, 255, 0.25) transparent;
+}

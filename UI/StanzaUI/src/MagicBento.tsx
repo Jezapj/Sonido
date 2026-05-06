@@ -64,21 +64,21 @@ function PresetContent(){
   </div>
   )
 }
-
+const cardColour = "rgba(0, 0, 0, 0.92)";
 
 const cardData: BentoCardProps[] = [
   {
-    color: 'rgba(0, 0, 0, 0.92)',
+    color: cardColour,
     title: 'Status',
     description: 'Centralized data view',
     label: 'Dashboard',
     glowRgb: '132, 0, 255',
-    content: <div style={{ height: '100%', position: 'relative', top: '0', scale: '100%'}}>
+    content: <div style={{ height: '100%', position: 'relative', top: '0', scale: '100%', color: 'black'}}>
       <DashboardAudio /></div>,
     contentInteractive: true
   },
   {
-    color: 'rgba(0, 0, 0, 0.92)',
+    color: cardColour,
     title: 'FFT',
     description: 'Waveform analysis',
     label: 'Waveform',
@@ -89,7 +89,7 @@ const cardData: BentoCardProps[] = [
     contentInteractive: true
   },
   {
-    color: 'rgba(0, 0, 0, 0.92)',
+    color: cardColour,
     title: 'Effects',
     description: 'Pedal selector',
     label: 'DSP',
@@ -108,7 +108,7 @@ const cardData: BentoCardProps[] = [
     contentInteractive: true
   },
   {
-    color: 'rgba(0, 0, 0, 0.2)',
+    color: "rgba(0, 0, 0, 0.42)",
     title: 'Load/Save Setups',
     description: 'Streamline workflows',
     label: 'Presets',

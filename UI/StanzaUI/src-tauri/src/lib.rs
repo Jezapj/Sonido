@@ -35,13 +35,63 @@ async fn stream_audio(app: tauri::AppHandle) {
         }
     });
 }
+use std::io::Read;
+
+#[tauri::command]
+async fn stream_audio_serial(app: tauri::AppHandle, port_name: String, baud_rate: u32) {
+    tauri::async_runtime::spawn(async move {
+        // Open serial port
+        let mut port = match serialport::new(port_name.clone(), baud_rate)
+            .timeout(std::time::Duration::from_millis(10))
+            .open()
+        {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("Failed to open serial port {}: {}", port_name, e);
+                return;
+            }
+        };
+
+        let mut buffer: Vec<u8> = vec![0; 2048];
+
+        loop {
+            match port.read(buffer.as_mut_slice()) {
+                Ok(bytes_read) => {
+                    // Convert incoming bytes → f32 samples
+                    // ASSUMPTION: Arduino sends 16-bit signed PCM (little endian)
+                    let mut chunk: Vec<f32> = Vec::with_capacity(bytes_read / 2);
+
+                    for i in (0..bytes_read).step_by(2) {
+                        if i + 1 < bytes_read {
+                            let sample = i16::from_le_bytes([buffer[i], buffer[i + 1]]);
+                            chunk.push(sample as f32 / i16::MAX as f32);
+                        }
+                    }
+
+                    // Emit to frontend
+                    let _ = app.emit("audio_chunk", &chunk);
+                }
+                Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => {
+                    // normal — just no data this cycle
+                }
+                Err(e) => {
+                    eprintln!("Serial read error: {}", e);
+                    break;
+                }
+            }
+
+            // Small delay to avoid busy loop
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    });
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         // Both commands in one handler — two invoke_handler calls drops the first one
-        .invoke_handler(tauri::generate_handler![greet, stream_audio])
+        .invoke_handler(tauri::generate_handler![greet, stream_audio, stream_audio_serial])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

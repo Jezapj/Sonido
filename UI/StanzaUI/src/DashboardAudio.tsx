@@ -260,7 +260,7 @@ export default function DashboardAudio() {
 
     animRef.current = requestAnimationFrame(draw);
 
-    await invoke("stream_audio");
+    await invoke("stream_audio"); //Change here to real stream ( stream_audio_serial )
 
     unlistenRef.current = await listen<number[]>("audio_chunk", (event) => {
       ingestChunk(event.payload);

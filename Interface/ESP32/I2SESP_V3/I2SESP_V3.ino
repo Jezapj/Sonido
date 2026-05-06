@@ -16,7 +16,7 @@ static dsp_params_t params;
 
 void setup()
 {
-    Serial.begin(115200);
+    Serial.begin(2000000);
 
     // ================= RX (I2S0 SLAVE - STEREO) =================
     i2s_chan_config_t rx_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_SLAVE);
@@ -113,6 +113,23 @@ void loop()
 
     // ================= DSP =================
     dsp_chain_process_block(&dsp, &params, dsp_input, dsp_output, frames);
+
+    // ================= SERIAL STREAM OUT (MONO INT16 PCM) =================
+    int16_t serial_buf[BLOCK_SIZE];
+
+    for (int i = 0; i < frames; i++) {
+        float s = dsp_output[i];
+
+        // Clamp to [-1, 1]
+        if (s >  1.0f) s =  1.0f;
+        if (s < -1.0f) s = -1.0f;
+
+        // Convert to int16
+        serial_buf[i] = (int16_t)(s * 32767.0f);
+    }
+
+    // Send as raw bytes (IMPORTANT: not Serial.print)
+    Serial.write((uint8_t*)serial_buf, frames * sizeof(int16_t));
     
 
     // ================= MONO FLOAT → STEREO INT32 =================

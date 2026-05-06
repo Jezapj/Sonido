@@ -87,7 +87,7 @@ export default function RustStreamExample() {
     animFrameRef.current = requestAnimationFrame(draw);
 
     // Tell Rust to begin emitting audio_chunk events
-    await invoke("stream_audio");
+    await invoke("stream_audio");  //Change here to real stream ( stream_audio_serial )
 
     // event name matches app.emit("audio_chunk", ...) in Rust
     unlistenRef.current = await listen<number[]>("audio_chunk", (event) => {

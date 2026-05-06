@@ -57,9 +57,13 @@ uniform vec2 parallaxOffset;
 uniform vec3 lineGradient[8];
 uniform int lineGradientCount;
 
-const vec3 BLACK = vec3(0.0);
+// const vec3 BLACK = vec3(255,255,255.0)/ 255.0;
+// const vec3 PINK  = vec3(132.0, 50.0, 200.0) / 255.0;
+// const vec3 BLUE  = vec3(100.0,  100.0, 200.0) / 255.0;
+
+const vec3 BLACK = vec3(0, 0.0, 0.0) / 255.0; //Cool looking, to use with black grid
 const vec3 PINK  = vec3(233.0, 71.0, 245.0) / 255.0;
-const vec3 BLUE  = vec3(47.0,  75.0, 162.0) / 255.0;
+const vec3 BLUE  = vec3(0, 0.0, 0.0) / 255.0;
 
 mat2 rotate(float r) {
   return mat2(cos(r), sin(r), -sin(r), cos(r));
@@ -213,7 +217,7 @@ type WavePosition = {
 
 type FloatingLinesProps = {
   linesGradient?: string[];
-  enabledWaves?: Array<string>;
+  enabledWaves?: Array<'top' | 'middle' | 'bottom'>;
   lineCount?: number | number[];
   lineDistance?: number | number[];
   topWavePosition?: WavePosition;
@@ -226,10 +230,10 @@ type FloatingLinesProps = {
   mouseDamping?: number;
   parallax?: boolean;
   parallaxStrength?: number;
+  mixBlendMode?: React.CSSProperties['mixBlendMode'];
   gradientStart?: string;
   gradientMid?: string;
   gradientEnd?: string;
-  mixBlendMode?: React.CSSProperties['mixBlendMode'];
 };
 
 function hexToVec3(hex: string): Vector3 {
@@ -270,7 +274,7 @@ export default function FloatingLines({
   bendStrength = -0.5,
   mouseDamping = 0.05,
   parallax = true,
-  parallaxStrength = 0.3,
+  parallaxStrength = 0.2,
   mixBlendMode = 'screen'
 }: FloatingLinesProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
