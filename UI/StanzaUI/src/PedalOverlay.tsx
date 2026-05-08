@@ -1,10 +1,18 @@
-import { useEffect, useRef, FC, useState } from 'react';
+import { useEffect, useRef, FC, useState, useCallback } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { gsap } from 'gsap';
 import { GalleryItem } from './CircularGallery';
 import './PedalOverlay.css';
 
+// ─── Pedal IDs ────────────────────────────────────────────────────────────────
+// These must match the PEDAL_* defines in the ESP32 firmware.
+const PEDAL_IDS: Record<string, number> = {
+  'Blurry Lights': 0, // EQ + Pre-Gain   → dsp_params_t
+  'New York':      1, // Overdrive        (future)
+  'Bridge':        2, // Spring Reverb    (future)
+};
+
 // ─── Pedal parameter definitions ──────────────────────────────────────────────
-// Each pedal type declares its own knobs. Adding a new pedal = add a new entry.
 
 export interface KnobDef {
   key: string;
@@ -17,32 +25,30 @@ export interface KnobDef {
 }
 
 export interface PedalDef {
-  label: string;   // display name
+  label: string;
   knobs: KnobDef[];
 }
 
-// Maps gallery card text → pedal definition.
-// To add a new pedal, add its card text and knob definitions here.
+// The knob order inside each pedal MUST match the field order of the
+// corresponding C struct (dsp_params_t for Blurry Lights, etc.).
 const PEDAL_DEFS: Record<string, PedalDef> = {
   'Blurry Lights': {
     label: 'EQ + Pre-Gain',
     knobs: [
-      { key: 'pre_gain',        label: 'Pre-Gain',  min: 0,    max: 4,     defaultValue: 1.0,  unit: '×',  decimals: 2 },
-      { key: 'eq_low_gain_db',  label: 'Low Gain',  min: -12,  max: 12,    defaultValue: 0,  unit: 'dB', decimals: 1 },
-      { key: 'eq_mid_gain_db',  label: 'Mid Gain',  min: -12,  max: 12,    defaultValue: 0, unit: 'dB', decimals: 1 },
-      { key: 'eq_high_gain_db', label: 'High Gain', min: -12,  max: 12,    defaultValue: 0,  unit: 'dB', decimals: 1 },
-      { key: 'eq_low_freq',     label: 'Low Freq',  min: 20,   max: 500,   defaultValue: 80,   unit: 'Hz', decimals: 0 },
-      { key: 'eq_mid_freq',     label: 'Mid Freq',  min: 200,  max: 5000,  defaultValue: 800,  unit: 'Hz', decimals: 0 },
-      { key: 'eq_high_freq',    label: 'High Freq', min: 1000, max: 20000, defaultValue: 6000, unit: 'Hz', decimals: 0 },
-      { key: 'eq_low_q',        label: 'Low Q',     min: 0.1,  max: 4,     defaultValue: 1.0,              decimals: 2 },
-      { key: 'eq_mid_q',        label: 'Mid Q',     min: 0.1,  max: 4,     defaultValue: 1.0,              decimals: 2 },
-      { key: 'eq_high_q',       label: 'High Q',    min: 0.1,  max: 4,     defaultValue: 1.0,              decimals: 2 },
-      { key: 'limiter_threshold', label: 'Limiter', min: 0.1,  max: 2,     defaultValue: 0.95,              decimals: 2 },
+      { key: 'pre_gain',          label: 'Pre-Gain',  min: 0,    max: 4,     defaultValue: 1.0,  unit: '×',  decimals: 2 },
+      { key: 'eq_low_gain_db',    label: 'Low Gain',  min: -12,  max: 12,    defaultValue: 0,    unit: 'dB', decimals: 1 },
+      { key: 'eq_mid_gain_db',    label: 'Mid Gain',  min: -12,  max: 12,    defaultValue: 0,    unit: 'dB', decimals: 1 },
+      { key: 'eq_high_gain_db',   label: 'High Gain', min: -12,  max: 12,    defaultValue: 0,    unit: 'dB', decimals: 1 },
+      { key: 'eq_low_freq',       label: 'Low Freq',  min: 20,   max: 500,   defaultValue: 80,   unit: 'Hz', decimals: 0 },
+      { key: 'eq_mid_freq',       label: 'Mid Freq',  min: 200,  max: 5000,  defaultValue: 800,  unit: 'Hz', decimals: 0 },
+      { key: 'eq_high_freq',      label: 'High Freq', min: 1000, max: 20000, defaultValue: 6000, unit: 'Hz', decimals: 0 },
+      { key: 'eq_low_q',          label: 'Low Q',     min: 0.1,  max: 4,     defaultValue: 1.0,              decimals: 2 },
+      { key: 'eq_mid_q',          label: 'Mid Q',     min: 0.1,  max: 4,     defaultValue: 1.0,              decimals: 2 },
+      { key: 'eq_high_q',         label: 'High Q',    min: 0.1,  max: 4,     defaultValue: 1.0,              decimals: 2 },
+      { key: 'limiter_threshold', label: 'Limiter',   min: 0.1,  max: 2,     defaultValue: 0.95,             decimals: 2 },
     ],
   },
 
-  // Generic 3-knob pedals — Adjust1 / Adjust2 / Level
-  // These will be replaced with proper definitions once the C DSP files are written.
   'New York': {
     label: 'Overdrive',
     knobs: [
@@ -61,7 +67,6 @@ const PEDAL_DEFS: Record<string, PedalDef> = {
   },
 };
 
-// Fallback for any card not yet assigned a proper pedal definition
 const GENERIC_DEF: PedalDef = {
   label: 'Effect',
   knobs: [
@@ -75,7 +80,7 @@ const GENERIC_DEF: PedalDef = {
 
 export interface PedalState {
   enabled: boolean;
-  values: Record<string, number>;  // keyed by KnobDef.key
+  values: Record<string, number>;
 }
 
 function buildDefaultState(def: PedalDef): PedalState {
@@ -83,6 +88,37 @@ function buildDefaultState(def: PedalDef): PedalState {
     enabled: false,
     values: Object.fromEntries(def.knobs.map(k => [k.key, k.defaultValue])),
   };
+}
+
+// ─── Hardware sync ────────────────────────────────────────────────────────────
+
+/**
+ * Serialize `state` into a param packet and send to the ESP32 via the
+ * `update_dsp_params` Tauri command.  Silently no-ops when:
+ *   - the pedal has no registered ID (future pedal with no firmware yet)
+ *   - no serial port is open (uses synthetic audio)
+ */
+async function syncToHardware(
+  itemText: string,
+  def: PedalDef,
+  state: PedalState,
+): Promise<void> {
+  const pedal_id = PEDAL_IDS[itemText];
+  if (pedal_id === undefined) return; // no firmware support yet
+
+  // Build ordered float array matching the C struct field order.
+  const params: number[] = def.knobs.map(k => state.values[k.key] ?? k.defaultValue);
+
+  try {
+    await invoke<void>('update_dsp_params', {
+      pedalId: pedal_id,
+      enabled: state.enabled,
+      params,
+    });
+  } catch (err) {
+    // Log but don't crash the UI — hardware may not be connected.
+    console.warn('[PedalOverlay] update_dsp_params failed:', err);
+  }
 }
 
 // ─── SVG Rotary Knob ──────────────────────────────────────────────────────────
@@ -185,35 +221,67 @@ const PedalOverlay: FC<PedalOverlayProps> = ({ item, state, onStateChange, onClo
 
   const def = PEDAL_DEFS[item.text] ?? GENERIC_DEF;
 
-  // Initialise from persisted state or build from defaults
   const [localState, setLocalState] = useState<PedalState>(
-    () => state ?? buildDefaultState(def)
+    () => state ?? buildDefaultState(def),
   );
+
+  // Debounce timer ref — used to coalesce rapid knob drags into one serial write.
+  const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ---------------------------------------------------------------------------
+  // syncToHardwareDebounced — waits 80 ms after the last change before writing.
+  // Toggle changes call syncToHardware directly (no debounce needed).
+  // ---------------------------------------------------------------------------
+  const scheduleSync = useCallback((nextState: PedalState) => {
+    if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+    syncTimerRef.current = setTimeout(() => {
+      syncToHardware(item.text, def, nextState);
+    }, 80);
+  }, [item.text, def]);
 
   // Animate in
   useEffect(() => {
     gsap.fromTo(overlayRef.current,
       { opacity: 0 },
-      { opacity: 1, duration: 0.22, ease: 'power2.out' }
+      { opacity: 1, duration: 0.22, ease: 'power2.out' },
     );
     gsap.fromTo(panelRef.current,
       { scale: 0.88, y: 36, opacity: 0 },
-      { scale: 1,    y: 0,  opacity: 1, duration: 0.36, ease: 'power3.out' }
+      { scale: 1,    y: 0,  opacity: 1, duration: 0.36, ease: 'power3.out' },
     );
+
+    // On first open: push current (possibly default) params to hardware
+    // so the ESP32 is in sync with the UI state immediately.
+    syncToHardware(item.text, def, localState);
+
+    return () => {
+      if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleClose = () => {
-    onStateChange(localState);   // persist on close
+    onStateChange(localState);
     gsap.to(panelRef.current,   { scale: 0.88, y: 36, opacity: 0, duration: 0.2,  ease: 'power2.in' });
     gsap.to(overlayRef.current, { opacity: 0,          duration: 0.24, ease: 'power2.in', onComplete: onClose });
   };
 
+  // Knob change: update local state immediately, debounce the serial write.
   const setKnob = (key: string, v: number) => {
-    setLocalState(prev => ({ ...prev, values: { ...prev.values, [key]: v } }));
+    setLocalState(prev => {
+      const next = { ...prev, values: { ...prev.values, [key]: v } };
+      scheduleSync(next);
+      return next;
+    });
   };
 
+  // Toggle change: update local state and sync immediately (no debounce).
   const toggleEnabled = () => {
-    setLocalState(prev => ({ ...prev, enabled: !prev.enabled }));
+    setLocalState(prev => {
+      const next = { ...prev, enabled: !prev.enabled };
+      syncToHardware(item.text, def, next);
+      return next;
+    });
   };
 
   const { enabled, values } = localState;
@@ -234,7 +302,6 @@ const PedalOverlay: FC<PedalOverlayProps> = ({ item, state, onStateChange, onClo
             <h2 className="po-header__title">{item.text}</h2>
           </div>
 
-          {/* On / Off toggle */}
           <button
             className={`po-toggle${enabled ? ' po-toggle--on' : ' po-toggle--off'}`}
             onClick={toggleEnabled}
