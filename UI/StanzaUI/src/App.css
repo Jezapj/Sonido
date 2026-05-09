@@ -45,6 +45,14 @@
 .logo.tauri:hover {
   filter: drop-shadow(0 0 2em #24c8db);
 }
+@media (max-height: 500px){
+  .logoMain {
+    display: block;
+    margin-top: 0vh;
+    left: 15vw;
+    height: 50%;
+}
+}
 
 .row {
   display: flex;
@@ -99,7 +107,12 @@ button {
 #greet-input {
   margin-right: 5px;
 }
-
+/* @media (max-height: 700px){
+  :root{
+    overflow-y: visible;
+  }
+  
+} */
 @media (prefers-color-scheme: dark) {
   :root {
     color: #f6f6f6;

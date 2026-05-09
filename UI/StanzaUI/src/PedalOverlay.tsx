@@ -4,15 +4,15 @@ import { gsap } from 'gsap';
 import { GalleryItem } from './CircularGallery';
 import './PedalOverlay.css';
 
-// ─── Pedal IDs ────────────────────────────────────────────────────────────────
-// These must match the PEDAL_* defines in the ESP32 firmware.
-const PEDAL_IDS: Record<string, number> = {
-  'Blurry Lights': 0, // EQ + Pre-Gain   → dsp_params_t
-  'New York':      1, // Overdrive        (future)
-  'Bridge':        2, // Spring Reverb    (future)
+// ── Pedal IDs ─────────────────────────────────────────────────────────────────
+// Must match PEDAL_* defines in the ESP32 firmware.
+export const PEDAL_IDS: Record<string, number> = {
+  'Blurry Lights': 0, // EQ + Pre-Gain
+  'New York':      1, // Overdrive  (future)
+  'Bridge':        2, // Spring Reverb (future)
 };
 
-// ─── Pedal parameter definitions ──────────────────────────────────────────────
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface KnobDef {
   key: string;
@@ -29,9 +29,14 @@ export interface PedalDef {
   knobs: KnobDef[];
 }
 
-// The knob order inside each pedal MUST match the field order of the
-// corresponding C struct (dsp_params_t for Blurry Lights, etc.).
-const PEDAL_DEFS: Record<string, PedalDef> = {
+export interface PedalState {
+  enabled: boolean;
+  values: Record<string, number>;
+}
+
+// ── Pedal parameter definitions ───────────────────────────────────────────────
+// Knob order MUST match the C struct field order for each pedal.
+export const PEDAL_DEFS: Record<string, PedalDef> = {
   'Blurry Lights': {
     label: 'EQ + Pre-Gain',
     knobs: [
@@ -48,7 +53,6 @@ const PEDAL_DEFS: Record<string, PedalDef> = {
       { key: 'limiter_threshold', label: 'Limiter',   min: 0.1,  max: 2,     defaultValue: 0.95,             decimals: 2 },
     ],
   },
-
   'New York': {
     label: 'Overdrive',
     knobs: [
@@ -76,38 +80,26 @@ const GENERIC_DEF: PedalDef = {
   ],
 };
 
-// ─── State that persists per pedal card ───────────────────────────────────────
+// ── Default state builder ─────────────────────────────────────────────────────
 
-export interface PedalState {
-  enabled: boolean;
-  values: Record<string, number>;
-}
-
-function buildDefaultState(def: PedalDef): PedalState {
+export function buildDefaultState(def: PedalDef): PedalState {
   return {
     enabled: false,
     values: Object.fromEntries(def.knobs.map(k => [k.key, k.defaultValue])),
   };
 }
 
-// ─── Hardware sync ────────────────────────────────────────────────────────────
-
-/**
- * Serialize `state` into a param packet and send to the ESP32 via the
- * `update_dsp_params` Tauri command.  Silently no-ops when:
- *   - the pedal has no registered ID (future pedal with no firmware yet)
- *   - no serial port is open (uses synthetic audio)
- */
-async function syncToHardware(
+// ── Hardware sync ─────────────────────────────────────────────────────────────
+// Exported so MagicBento can call it when loading a preset.
+export async function syncToHardware(
   itemText: string,
   def: PedalDef,
   state: PedalState,
 ): Promise<void> {
   const pedal_id = PEDAL_IDS[itemText];
-  if (pedal_id === undefined) return; // no firmware support yet
+  if (pedal_id === undefined) return;
 
-  // Build ordered float array matching the C struct field order.
-  const params: number[] = def.knobs.map(k => state.values[k.key] ?? k.defaultValue);
+  const params = def.knobs.map(k => state.values[k.key] ?? k.defaultValue);
 
   try {
     await invoke<void>('update_dsp_params', {
@@ -116,12 +108,11 @@ async function syncToHardware(
       params,
     });
   } catch (err) {
-    // Log but don't crash the UI — hardware may not be connected.
     console.warn('[PedalOverlay] update_dsp_params failed:', err);
   }
 }
 
-// ─── SVG Rotary Knob ──────────────────────────────────────────────────────────
+// ── SVG Knob ──────────────────────────────────────────────────────────────────
 
 interface KnobProps {
   def: KnobDef;
@@ -134,27 +125,21 @@ interface KnobProps {
 const Knob: FC<KnobProps> = ({ def, value, onChange, size = 60, disabled = false }) => {
   const dragRef = useRef<{ startY: number; startValue: number } | null>(null);
 
-  const START_DEG = -135;
-  const END_DEG   =  135;
-  const norm      = Math.max(0, Math.min(1, (value - def.min) / (def.max - def.min)));
-  const fillDeg   = START_DEG + norm * (END_DEG - START_DEG);
-  const cx = size / 2;
-  const cy = size / 2;
-  const trackR = size * 0.33;
+  const START_DEG = -135, END_DEG = 135;
+  const norm    = Math.max(0, Math.min(1, (value - def.min) / (def.max - def.min)));
+  const fillDeg = START_DEG + norm * (END_DEG - START_DEG);
+  const cx = size / 2, cy = size / 2, trackR = size * 0.33;
 
   const polarXY = (deg: number, r: number) => {
     const rad = ((deg - 90) * Math.PI) / 180;
     return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
   };
-
   const arcPath = (from: number, to: number, r: number) => {
     if (Math.abs(to - from) < 0.3) return '';
-    const s = polarXY(from, r);
-    const e = polarXY(to,   r);
+    const s = polarXY(from, r), e = polarXY(to, r);
     const large = to - from > 180 ? 1 : 0;
     return `M ${s.x.toFixed(2)} ${s.y.toFixed(2)} A ${r} ${r} 0 ${large} 1 ${e.x.toFixed(2)} ${e.y.toFixed(2)}`;
   };
-
   const indicator = polarXY(fillDeg, trackR * 0.68);
 
   const onMouseDown = (e: React.MouseEvent) => {
@@ -169,36 +154,28 @@ const Knob: FC<KnobProps> = ({ def, value, onChange, size = 60, disabled = false
     const onUp = () => {
       dragRef.current = null;
       window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup',   onUp);
+      window.removeEventListener('mouseup', onUp);
     };
     window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup',   onUp);
+    window.addEventListener('mouseup', onUp);
   };
 
-  const display = value >= 1000
-    ? `${(value / 1000).toFixed(1)}k`
-    : value.toFixed(def.decimals ?? 1);
+  const display = value >= 1000 ? `${(value / 1000).toFixed(1)}k` : value.toFixed(def.decimals ?? 1);
 
   return (
     <div className={`po-knob${disabled ? ' po-knob--disabled' : ''}`}>
-      <svg
-        width={size} height={size}
-        viewBox={`0 0 ${size} ${size}`}
-        className="po-knob__svg"
-        onMouseDown={onMouseDown}
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}
+        className="po-knob__svg" onMouseDown={onMouseDown}
         onDoubleClick={() => !disabled && onChange(def.defaultValue)}
-        style={{ cursor: disabled ? 'default' : 'ns-resize' }}
-      >
+        style={{ cursor: disabled ? 'default' : 'ns-resize' }}>
         <circle cx={cx} cy={cy} r={size * 0.42} fill="#0c0c0c" stroke="#1a1a1a" strokeWidth="1.2" />
         <path d={arcPath(START_DEG, END_DEG, trackR)} fill="none" stroke="#1c1c1c" strokeWidth="3" strokeLinecap="round" />
         {norm > 0.01 && !disabled && (
           <path d={arcPath(START_DEG, fillDeg, trackR)} fill="none" stroke="rgba(180,140,255,0.9)" strokeWidth="3" strokeLinecap="round" />
         )}
         <circle cx={cx} cy={cy} r={size * 0.2} fill="#111" stroke="#252525" strokeWidth="1" />
-        <circle
-          cx={indicator.x} cy={indicator.y} r={size * 0.062}
-          fill={disabled ? 'rgba(255,255,255,0.12)' : 'rgba(200,160,255,1)'}
-        />
+        <circle cx={indicator.x} cy={indicator.y} r={size * 0.062}
+          fill={disabled ? 'rgba(255,255,255,0.12)' : 'rgba(200,160,255,1)'} />
       </svg>
       <span className="po-knob__label">{def.label}</span>
       <span className="po-knob__value">{disabled ? '—' : `${display}${def.unit ?? ''}`}</span>
@@ -206,7 +183,7 @@ const Knob: FC<KnobProps> = ({ def, value, onChange, size = 60, disabled = false
   );
 };
 
-// ─── PedalOverlay ─────────────────────────────────────────────────────────────
+// ── PedalOverlay ──────────────────────────────────────────────────────────────
 
 interface PedalOverlayProps {
   item: GalleryItem;
@@ -216,8 +193,9 @@ interface PedalOverlayProps {
 }
 
 const PedalOverlay: FC<PedalOverlayProps> = ({ item, state, onStateChange, onClose }) => {
-  const overlayRef = useRef<HTMLDivElement>(null);
-  const panelRef   = useRef<HTMLDivElement>(null);
+  const overlayRef   = useRef<HTMLDivElement>(null);
+  const panelRef     = useRef<HTMLDivElement>(null);
+  const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const def = PEDAL_DEFS[item.text] ?? GENERIC_DEF;
 
@@ -225,13 +203,6 @@ const PedalOverlay: FC<PedalOverlayProps> = ({ item, state, onStateChange, onClo
     () => state ?? buildDefaultState(def),
   );
 
-  // Debounce timer ref — used to coalesce rapid knob drags into one serial write.
-  const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // ---------------------------------------------------------------------------
-  // syncToHardwareDebounced — waits 80 ms after the last change before writing.
-  // Toggle changes call syncToHardware directly (no debounce needed).
-  // ---------------------------------------------------------------------------
   const scheduleSync = useCallback((nextState: PedalState) => {
     if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
     syncTimerRef.current = setTimeout(() => {
@@ -239,34 +210,25 @@ const PedalOverlay: FC<PedalOverlayProps> = ({ item, state, onStateChange, onClo
     }, 80);
   }, [item.text, def]);
 
-  // Animate in
   useEffect(() => {
     gsap.fromTo(overlayRef.current,
-      { opacity: 0 },
-      { opacity: 1, duration: 0.22, ease: 'power2.out' },
-    );
+      { opacity: 0 }, { opacity: 1, duration: 0.22, ease: 'power2.out' });
     gsap.fromTo(panelRef.current,
       { scale: 0.88, y: 36, opacity: 0 },
-      { scale: 1,    y: 0,  opacity: 1, duration: 0.36, ease: 'power3.out' },
-    );
+      { scale: 1,    y: 0,  opacity: 1, duration: 0.36, ease: 'power3.out' });
 
-    // On first open: push current (possibly default) params to hardware
-    // so the ESP32 is in sync with the UI state immediately.
     syncToHardware(item.text, def, localState);
 
-    return () => {
-      if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
-    };
+    return () => { if (syncTimerRef.current) clearTimeout(syncTimerRef.current); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleClose = () => {
     onStateChange(localState);
     gsap.to(panelRef.current,   { scale: 0.88, y: 36, opacity: 0, duration: 0.2,  ease: 'power2.in' });
-    gsap.to(overlayRef.current, { opacity: 0,          duration: 0.24, ease: 'power2.in', onComplete: onClose });
+    gsap.to(overlayRef.current, { opacity: 0, duration: 0.24, ease: 'power2.in', onComplete: onClose });
   };
 
-  // Knob change: update local state immediately, debounce the serial write.
   const setKnob = (key: string, v: number) => {
     setLocalState(prev => {
       const next = { ...prev, values: { ...prev.values, [key]: v } };
@@ -275,7 +237,6 @@ const PedalOverlay: FC<PedalOverlayProps> = ({ item, state, onStateChange, onClo
     });
   };
 
-  // Toggle change: update local state and sync immediately (no debounce).
   const toggleEnabled = () => {
     setLocalState(prev => {
       const next = { ...prev, enabled: !prev.enabled };
@@ -287,44 +248,31 @@ const PedalOverlay: FC<PedalOverlayProps> = ({ item, state, onStateChange, onClo
   const { enabled, values } = localState;
 
   return (
-    <div
-      ref={overlayRef}
-      className="po-overlay"
-      onMouseDown={e => { if (e.target === overlayRef.current) handleClose(); }}
-    >
+    <div ref={overlayRef} className="po-overlay"
+      onMouseDown={e => { if (e.target === overlayRef.current) handleClose(); }}>
       <div ref={panelRef} className="po-panel">
-
-        {/* ── Header ── */}
         <div className="po-header">
           <div className="po-header__img" style={{ backgroundImage: `url(${item.image})` }} />
           <div className="po-header__text">
             <span className="po-header__tag">{def.label}</span>
             <h2 className="po-header__title">{item.text}</h2>
           </div>
-
           <button
             className={`po-toggle${enabled ? ' po-toggle--on' : ' po-toggle--off'}`}
-            onClick={toggleEnabled}
-            title={enabled ? 'Turn off' : 'Turn on'}
-          >
+            onClick={toggleEnabled} title={enabled ? 'Turn off' : 'Turn on'}>
             <span className="po-toggle__dot" />
             <span className="po-toggle__label">{enabled ? 'ON' : 'OFF'}</span>
           </button>
-
           <button className="po-close" onClick={handleClose}>✕</button>
         </div>
 
-        {/* ── Knobs grid ── */}
         <div className={`po-body${!enabled ? ' po-body--disabled' : ''}`}>
           <div className="po-knobs-grid">
             {def.knobs.map(knob => (
-              <Knob
-                key={knob.key}
-                def={knob}
+              <Knob key={knob.key} def={knob}
                 value={values[knob.key] ?? knob.defaultValue}
                 onChange={v => setKnob(knob.key, v)}
-                disabled={!enabled}
-              />
+                disabled={!enabled} />
             ))}
           </div>
         </div>

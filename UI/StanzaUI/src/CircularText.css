@@ -25,4 +25,20 @@
   bottom: 0;
   font-size: 24px;
   transition: all 0.5s cubic-bezier(0, 0, 0, 1);
+
+}
+
+@media (max-height: 500px ){
+  .circular-text {
+    width: 150px;
+    height: 150px;
+    left: 40vw;
+    top: 33vh;
+    position: absolute;
+    z-index: -1;
+  }
+
+  .circular-text span {
+    font-size: 16px;
+  }
 }

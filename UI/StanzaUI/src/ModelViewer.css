@@ -1,0 +1,13 @@
+@media (max-height: 500px ){
+  .ModelViewer {
+    
+    right: 35vw;
+    top: 26vh;
+    position: absolute;
+    z-index: -10000 !important;
+  }
+  canvas {
+    position: absolute;
+    z-index: -10000 !important;
+  }
+}

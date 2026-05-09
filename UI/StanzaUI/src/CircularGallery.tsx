@@ -1,9 +1,10 @@
 import { Camera, Mesh, Plane, Program, Renderer, Texture, Transform } from 'ogl';
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
-import PedalOverlay, { PedalState } from './PedalOverlay';
+import PedalOverlay from './PedalOverlay';
+import type { PedalState } from './PedalOverlay';
 import './CircularGallery.css';
 
-// ─── Public types ─────────────────────────────────────────────────────────────
+// ── Public types ──────────────────────────────────────────────────────────────
 
 export interface GalleryItem {
   image: string;
@@ -20,24 +21,17 @@ interface CardPosition {
 
 type GL = Renderer['gl'];
 
-// ─── Defaults ─────────────────────────────────────────────────────────────────
+// ── Defaults ──────────────────────────────────────────────────────────────────
 
 const DEFAULT_ITEMS: GalleryItem[] = [
   { image: `/Reverb(Spring)_pedal.png`,  text: 'Bridge' },
-  { image: `EQPreGain_pedal.png`,  text: 'Desk Setup' },
-  { image: `/OD_pedal.png`,  text: 'Waterfall' },
-  { image: `EQPreGain_pedal.png`,  text: 'Strawberries' },
-  { image: `/OD_pedal.png`,  text: 'Deep Diving' },
-  { image: `EQPreGain_pedal.png`, text: 'Train Track' },
-  { image: `/OD_pedal.png`, text: 'Santorini' },
+  { image: `Distortion_pedal.png`,  text: 'Strawberries' },
   { image: `/EQPreGain_pedal.png`,  text: 'Blurry Lights' },
   { image: `/OD_pedal.png`,  text: 'New York' },
-  { image: `EQPreGain_pedal.png`, text: 'Good Boy' },
-  { image: `/OD_pedal.png`, text: 'Coastline' },
-  { image: `EQPreGain_pedal.png`, text: 'Palm Trees' },
+  { image: `Phaser_pedal.png`, text: 'Good Boy' }
 ];
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function debounce<T extends (...args: any[]) => void>(func: T, wait: number) {
   let timeout: number;
@@ -88,13 +82,13 @@ function createTextTexture(
   return { texture, width: canvas.width, height: canvas.height };
 }
 
-// ─── Title ────────────────────────────────────────────────────────────────────
+// ── Title ─────────────────────────────────────────────────────────────────────
 
 class Title {
   gl: GL; plane: Mesh; renderer: Renderer;
   text: string; textColor: string; font: string; mesh!: Mesh;
 
-  constructor({ gl, plane, renderer, text, textColor = '#545050', font = '30px sans-serif' }:
+  constructor({ gl, plane, renderer, text, textColor = '#030303', font = '30px sans-serif' }:
     { gl: GL; plane: Mesh; renderer: Renderer; text: string; textColor?: string; font?: string }) {
     autoBind(this);
     this.gl = gl; this.plane = plane; this.renderer = renderer;
@@ -120,13 +114,13 @@ class Title {
   }
 }
 
-// ─── Media ────────────────────────────────────────────────────────────────────
+// ── Media ─────────────────────────────────────────────────────────────────────
 
 interface MediaProps {
   geometry: Plane; gl: GL; image: string; index: number; length: number;
   renderer: Renderer; scene: Transform;
   screen: { width: number; height: number };
-  text: string ;
+  text: string;
   viewport: { width: number; height: number };
   bend: number; textColor: string; borderRadius?: number; font?: string;
 }
@@ -214,7 +208,7 @@ class Media {
   }
 }
 
-// ─── App ──────────────────────────────────────────────────────────────────────
+// ── App ───────────────────────────────────────────────────────────────────────
 
 interface AppConfig {
   items?: GalleryItem[]; bend?: number; textColor?: string;
@@ -365,7 +359,6 @@ class App {
     this.medias?.forEach(m => m.update(this.scroll, dir));
     this.renderer.render({ scene: this.scene, camera: this.camera });
 
-    // Push card CSS positions for status dots — deduplicate to closest-to-centre per text
     if (this.onFramePositions && this.screen) {
       const best = new Map<string, Media>();
       for (const m of this.medias) {
@@ -420,47 +413,73 @@ class App {
   }
 }
 
-// ─── React component ──────────────────────────────────────────────────────────
+// ── React component ───────────────────────────────────────────────────────────
 
 interface CircularGalleryProps {
-  items?: GalleryItem[]; bend?: number; textColor?: string;
-  borderRadius?: number; font?: string; scrollSpeed?: number; scrollEase?: number;
+  items?: GalleryItem[];
+  bend?: number;
+  textColor?: string;
+  borderRadius?: number;
+  font?: string;
+  scrollSpeed?: number;
+  scrollEase?: number;
+  // Optional controlled state — provided by MagicBento so PresetsCard can share it
+  pedalStates?: Record<string, PedalState>;
+  onPedalStatesChange?: (states: Record<string, PedalState>) => void;
 }
 
 export default function CircularGallery({
   items, bend=3, textColor='#ffffff',
   borderRadius=0.05, font='bold 30px Figtree',
   scrollSpeed=2, scrollEase=0.05,
+  pedalStates: externalPedalStates,
+  onPedalStatesChange,
 }: CircularGalleryProps) {
   const containerRef  = useRef<HTMLDivElement>(null);
   const appRef        = useRef<App|null>(null);
   const dotRefs       = useRef<Record<string, HTMLDivElement>>({});
 
-  const [clickedItem,  setClickedItem]  = useState<GalleryItem|null>(null);
-  const [pedalStates,  setPedalStates]  = useState<Record<string, PedalState>>({});
+  const [clickedItem, setClickedItem] = useState<GalleryItem|null>(null);
+
+  // ── Controlled / uncontrolled pedal state ──────────────────────────────────
+  // When pedalStates prop is provided, use it (controlled by parent).
+  // Otherwise manage internally as before.
+  const [internalPedalStates, setInternalPedalStates] = useState<Record<string, PedalState>>({});
+
+  const pedalStates = externalPedalStates !== undefined
+    ? externalPedalStates
+    : internalPedalStates;
+
+  const updatePedalState = useCallback((text: string, state: PedalState) => {
+    const newStates = { ...pedalStates, [text]: state };
+    if (onPedalStatesChange) {
+      onPedalStatesChange(newStates);
+    } else {
+      setInternalPedalStates(prev => ({ ...prev, [text]: state }));
+    }
+  }, [pedalStates, onPedalStatesChange]);
+
+  // ─────────────────────────────────────────────────────────────────────────
 
   const uniqueTexts = useMemo(() =>
     (items?.length ? items : DEFAULT_ITEMS).map(i => i.text), [items]);
 
-  // Update dot positions every frame via direct DOM mutation (no React re-render)
   const onFramePositions = useCallback((positions: CardPosition[]) => {
     positions.forEach(({ text, cssX, cssY, halfW, halfH }) => {
       const dot = dotRefs.current[text];
       if (!dot) return;
-      // Top-right corner of the card
       const x = cssX + halfW - 16;
       const y = cssY - halfH + 6;
       dot.style.transform = `translate(${x}px,${y}px)`;
-      // Hide if card is scrolled fully off screen
       const visible = cssX + halfW > 0 && cssX - halfW < (appRef.current?.screen.width ?? 9999);
       dot.style.opacity = visible ? '1' : '0';
     });
   }, []);
 
-  // Update dot colours whenever pedalStates changes
+  // Update dot colours whenever pedalStates changes (reacts to preset loads too)
   useEffect(() => {
     uniqueTexts.forEach(text => {
-      const dot     = dotRefs.current[text];
+      const dot = dotRefs.current[text];
       if (!dot) return;
       const enabled = pedalStates[text]?.enabled ?? false;
       dot.style.background = enabled ? '#22c55e' : '#ef4444';
@@ -470,7 +489,6 @@ export default function CircularGallery({
     });
   }, [pedalStates, uniqueTexts]);
 
-  // Boot App
   useEffect(() => {
     if (!containerRef.current) return;
     const app = new App(containerRef.current, {
@@ -482,14 +500,12 @@ export default function CircularGallery({
     return () => { app.destroy(); appRef.current = null; };
   }, [items, bend, textColor, borderRadius, font, scrollSpeed, scrollEase, onFramePositions]);
 
-  // Lock gallery interaction while overlay is open
   useEffect(() => {
     appRef.current?.setInteractionEnabled(clickedItem === null);
   }, [clickedItem]);
 
   return (
     <div className="circular-gallery" ref={containerRef}>
-      {/* Status dots — positioned by direct DOM in onFramePositions */}
       <div className="cg-dot-layer">
         {uniqueTexts.map(text => (
           <div
@@ -504,9 +520,7 @@ export default function CircularGallery({
         <PedalOverlay
           item={clickedItem}
           state={pedalStates[clickedItem.text]}
-          onStateChange={state =>
-            setPedalStates(prev => ({ ...prev, [clickedItem.text]: state }))
-          }
+          onStateChange={state => updatePedalState(clickedItem.text, state)}
           onClose={() => setClickedItem(null)}
         />
       )}

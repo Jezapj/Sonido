@@ -158,7 +158,7 @@ function App() {
               <div style={{ backgroundColor: "white", color: "white" }}></div>
             </MagicBento>
 
-            <div style={{ scale: "90%", top: '16vh', right: '80px', position: 'absolute', zIndex: 1000 }}>
+            <div style={{ scale: "90%", top: '16vh', right: '80px', position: 'absolute', zIndex: -1 }}>
               <ModelViewer
                 url="https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/main/2.0/ToyCar/glTF-Binary/ToyCar.glb"
                 width={"15vw"}
@@ -175,7 +175,7 @@ function App() {
               />
             </div>
 
-            <img style={{ scale: "25%", top: '-18vh', right: '17%', position: 'absolute', zIndex: 1 }} src={(theme === 'dark' )?"/STANZA_B_TP.png":"/STANZA_W_TP.png"} />
+            <img className="logoMain" style={{ scale: "25%", top: '-18vh', right: '17%', position: 'absolute', zIndex: 1 }} src={(theme === 'dark' )?"/STANZA_B_TP.png":"/STANZA_W_TP.png"} />
 
             <CircularText
               text={greetMsgRef.current}

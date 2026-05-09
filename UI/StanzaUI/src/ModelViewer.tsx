@@ -3,6 +3,7 @@ import { Canvas, useFrame, useLoader, useThree, invalidate } from '@react-three/
 import { OrbitControls, useGLTF, useFBX, useProgress, Html, Environment, ContactShadows } from '@react-three/drei';
 import * as THREE from 'three';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
+import './ModelViewer.css';
 
 const isMeshObject = (object: THREE.Object3D): object is THREE.Mesh => {
   return 'isMesh' in object && object.isMesh === true;
@@ -458,7 +459,7 @@ const ModelViewer: FC<ViewerProps> = ({
   };
 
   return (
-    <div
+    <div className="ModelViewer"
       style={{
         width,
         height,
