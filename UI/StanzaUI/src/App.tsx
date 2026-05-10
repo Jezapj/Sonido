@@ -66,6 +66,11 @@ function App() {
     }, 200);
   }
 
+  // Call this function when a button is clicked
+  const handleToggle = () => {
+    invoke('toggle_fullscreen'); 
+  };
+
   // Shared floating-lines background
   const floatingLinesBg = (
     <FloatingLines
@@ -96,13 +101,13 @@ function App() {
           transition: 'opacity 0.6s ease-in-out',
           pointerEvents: 'none'
         }}>
-          {floatingLinesBg}
+          {theme === "dark" ? floatingLinesBg: <div style={{ width: '100%', height: '100%', backgroundColor: 'rgb(200, 200, 200)' }} />}
         </div>
 
         {/* Background 2 — board / secondary */}
         <div style={{
           position: 'absolute', width: '100%', height: '100%',
-          opacity: bgVariant === 1 ? 1 : 0,
+          opacity: bgVariant === 1 ? 1 : 0.3,
           transition: 'opacity 0.6s ease-in-out',
           pointerEvents: 'none'
         }}>
@@ -110,7 +115,7 @@ function App() {
             speed={0.5}
             squareSize={40}
             direction="diagonal"
-            borderColor={theme === 'light' ? 'rgba(255,255,255,0.3)' : "rgba(255,255,255,0.3)"}
+            borderColor={theme === 'light' ? 'rgba(100,100,100,0.7)' : "rgba(255,255,255,0.3)"}
             hoverFillColor="#222"
             shape="square"
             hoverTrailAmount={0}
@@ -120,7 +125,8 @@ function App() {
       </div>
 
       {/* ── LANDING ── */}
-      {view === "landing" && (
+      {view === "landing" && (<>
+        <button onClick={handleToggle} style={{ position: 'fixed', top: 20, right: 20, zIndex: 1 }}> Toggle Fullscreen</button>
         <main className="container">
           <h1>Interactive Audio DSP</h1>
           <div className="row">
@@ -136,10 +142,13 @@ function App() {
           </form>
           <p>{}</p>
         </main>
+        </>
       )}
 
       {/* ── MAIN ── */}
       {view === "main" && (
+        <>
+        <button onClick={handleToggle} style={{ position: 'fixed', top: 20, right: 20, zIndex: 1 }}>^</button>
         <main className="container" style={{ padding: "5vh 0.5vw 0vh 0.5vw" }}>
           <div>
             <MagicBento
@@ -154,6 +163,7 @@ function App() {
               particleCount={12}
               glowColor="132, 0, 255"
               disableAnimations={false}
+              theme={theme}
             >
               <div style={{ backgroundColor: "white", color: "white" }}></div>
             </MagicBento>
@@ -181,10 +191,11 @@ function App() {
               text={greetMsgRef.current}
               onHover="speedUp"
               spinDuration={20}
-              className="custom-class"
+              className={theme === "dark"? "custom-class": "custom-class-light"}
             />
           </div>
         </main>
+        </>
       )}
 
       {/* ── BOARD ── */}
@@ -240,6 +251,7 @@ function App() {
           panelHeight={68}
           baseItemSize={50}
           magnification={200}
+          theme={theme}
         />
       )}
     </>

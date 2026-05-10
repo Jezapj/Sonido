@@ -29,6 +29,7 @@ export type DockProps = {
   dockHeight?: number;
   magnification?: number;
   spring?: SpringOptions;
+  theme?: 'light' | 'dark';
 };
 
 type DockItemProps = {
@@ -146,7 +147,8 @@ export default function Dock({
   distance = 200,
   panelHeight = 68,
   dockHeight = 256,
-  baseItemSize = 50
+  baseItemSize = 50,
+  theme = 'dark'
 }: DockProps) {
   const mouseX = useMotionValue(Infinity);
   const isHovered = useMotionValue(0);
@@ -169,7 +171,7 @@ export default function Dock({
           isHovered.set(0);
           mouseX.set(Infinity);
         }}
-        className={`dock-panel ${className}`}
+        className={theme === "dark" ? `dock-panel ${className}` : `dock-panel-light ${className}`}
         style={{ height: panelHeight }}
         role="toolbar"
         aria-label="Application dock"
