@@ -2,6 +2,13 @@ use tauri::Emitter;
 use std::io::{Read, Write};
 use std::sync::Mutex;
 use tauri::Manager;
+use tauri::Window;
+
+#[tauri::command]
+fn toggle_fullscreen(window: Window) {
+  let is_fullscreen = window.is_fullscreen().unwrap();
+  window.set_fullscreen(!is_fullscreen).unwrap();
+}
 
 pub struct SerialWritePort(pub Mutex<Option<Box<dyn serialport::SerialPort + Send>>>);
 
@@ -149,7 +156,8 @@ pub fn run() {
             list_serial_ports,
             stream_audio,
             stream_audio_serial,
-            update_dsp_params
+            update_dsp_params,
+            toggle_fullscreen
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

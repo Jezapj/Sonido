@@ -33,6 +33,7 @@ export interface BentoProps {
   glowColor?: string;
   clickEffect?: boolean;
   enableMagnetism?: boolean;
+  theme?: 'light' | 'dark';
 }
 
 const DEFAULT_PARTICLE_COUNT = 12;
@@ -409,6 +410,7 @@ const MagicBento: React.FC<BentoProps> = ({
   glowColor = DEFAULT_GLOW_COLOR,
   clickEffect = true,
   enableMagnetism = true,
+  theme = 'dark',
 }) => {
   const gridRef = useRef<HTMLDivElement>(null);
   const isMobile = useMobileDetection();
@@ -439,7 +441,7 @@ const MagicBento: React.FC<BentoProps> = ({
       content: (
         <div style={{ height: '190%', position: 'relative', top: '-20px', scale: '120%' }}>
           <CircularGallery
-            textColor="#ffffff"
+            textColor={theme === "dark"? "#ffffff" : "#000000"}
             scrollEase={0.3}
             bend={1}
             borderRadius={0.05}

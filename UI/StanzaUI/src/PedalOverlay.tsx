@@ -56,9 +56,9 @@ export const PEDAL_DEFS: Record<string, PedalDef> = {
   'New York': {
     label: 'Overdrive',
     knobs: [
-      { key: 'drive', label: 'Drive', min: 0, max: 1, defaultValue: 0.5, decimals: 2 },
-      { key: 'tone',  label: 'Tone',  min: 0, max: 1, defaultValue: 0.5, decimals: 2 },
-      { key: 'level', label: 'Level', min: 0, max: 1, defaultValue: 0.8, decimals: 2 },
+      { key: 'drive', label: 'Drive', min: 0, max: 1, defaultValue: 0.4, decimals: 2 },
+      { key: 'tone',  label: 'Tone',  min: 0, max: 1, defaultValue: 0.4, decimals: 2 },
+      { key: 'level', label: 'Level', min: 0, max: 1, defaultValue: 0.5, decimals: 2 },
     ],
   },
   'Bridge': {
