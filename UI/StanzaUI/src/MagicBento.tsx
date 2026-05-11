@@ -448,6 +448,7 @@ const MagicBento: React.FC<BentoProps> = ({
             scrollSpeed={7}
             pedalStates={pedalStates}
             onPedalStatesChange={setPedalStates}
+            theme={theme}
           />
         </div>
       ),

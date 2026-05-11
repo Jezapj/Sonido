@@ -24,11 +24,11 @@ type GL = Renderer['gl'];
 // ── Defaults ──────────────────────────────────────────────────────────────────
 
 const DEFAULT_ITEMS: GalleryItem[] = [
-  { image: `/Reverb(Spring)_pedal.png`,  text: 'Bridge' },
-  { image: `Distortion_pedal.png`,  text: 'Strawberries' },
-  { image: `/EQPreGain_pedal.png`,  text: 'Blurry Lights' },
-  { image: `/OD_pedal.png`,  text: 'New York' },
-  { image: `Phaser_pedal.png`, text: 'Good Boy' }
+  { image: `/L_Reverb(Spring)_pedal.png`,  text: 'Bridge' },
+  { image: `L_Distortion_pedal.png`,  text: 'Strawberries' },
+  { image: `/L_EQPreGain_pedal.png`,  text: 'Blurry Lights' },
+  { image: `/L_OD_pedal.png`,  text: 'New York' },
+  { image: `L_Phaser_pedal.png`, text: 'Good Boy' }
 ];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -425,6 +425,7 @@ interface CircularGalleryProps {
   scrollEase?: number;
   // Optional controlled state — provided by MagicBento so PresetsCard can share it
   pedalStates?: Record<string, PedalState>;
+  theme?: "dark" | "light";
   onPedalStatesChange?: (states: Record<string, PedalState>) => void;
 }
 
@@ -433,7 +434,7 @@ export default function CircularGallery({
   borderRadius=0.05, font='bold 30px Figtree',
   scrollSpeed=2, scrollEase=0.05,
   pedalStates: externalPedalStates,
-  onPedalStatesChange,
+  onPedalStatesChange, theme="dark"
 }: CircularGalleryProps) {
   const containerRef  = useRef<HTMLDivElement>(null);
   const appRef        = useRef<App|null>(null);

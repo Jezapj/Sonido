@@ -134,12 +134,12 @@ function App() {
           typingSpeed={75}
           pauseDuration={1500}
           showCursor
-          cursorCharacter="_"
-          text={["Interactive Audio DSP","Build the prefect sound."]}
+          cursorCharacter="|"
+          text={["Interactive Audio DSP","Build the perfect sound"]}
           deletingSpeed={50}
           
-          variableSpeedMin={60}
-          variableSpeedMax={120}
+          variableSpeed={ {min: 10, max: 70} }
+          // variableSpeedMax={120}
           cursorBlinkDuration={0.5}
         />
           {/* <h1>Interactive Audio DSP</h1> */}
