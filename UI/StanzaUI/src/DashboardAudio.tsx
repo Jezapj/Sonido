@@ -2,10 +2,16 @@ import { useRef, useState, useCallback } from "react";
 import { useSerialStream } from "./useSerialStream";
 
 const BUFFER_LEN  = 2048;
-const SAMPLE_RATE = 47991; // must match ESP32 SAMPLE_RATE
+const SAMPLE_RATE = 47991;
 
+// Pitch detection window — fundamentals only
 const MIN_FREQ = 70;
 const MAX_FREQ = 400;
+
+// FFT display cutoff — shows harmonics up to this frequency.
+// Guitar/bass fundamentals sit in ~80–1320 Hz; showing up to 4 kHz
+// makes that range fill the canvas instead of squashing into the left edge.
+const MAX_DISPLAY_HZ = 4000;
 
 // ── FFT ──────────────────────────────────────────────────────────────────────
 function fft(re: Float32Array, im: Float32Array) {
@@ -24,8 +30,8 @@ function fft(re: Float32Array, im: Float32Array) {
     const step = Math.PI * 2 / size;
     for (let i = 0; i < N; i += size) {
       for (let j = 0; j < half; j++) {
-        const k   = j * step;
-        const cos = Math.cos(k), sin = -Math.sin(k);
+        const k    = j * step;
+        const cos  = Math.cos(k), sin = -Math.sin(k);
         const tpre = re[i+j+half]*cos - im[i+j+half]*sin;
         const tpim = re[i+j+half]*sin + im[i+j+half]*cos;
         re[i+j+half] = re[i+j] - tpre; im[i+j+half] = im[i+j] - tpim;
@@ -87,18 +93,17 @@ function freqToNote(freq: number) {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 export default function DashboardAudio() {
-  const canvasRef    = useRef<HTMLCanvasElement>(null);
-  const bufferRef    = useRef<Float32Array>(new Float32Array(BUFFER_LEN));
-  const animRef      = useRef(0);
-  const runningRef   = useRef(false);
-  const prevFreqRef  = useRef(0);
+  const canvasRef   = useRef<HTMLCanvasElement>(null);
+  const bufferRef   = useRef<Float32Array>(new Float32Array(BUFFER_LEN));
+  const animRef     = useRef(0);
+  const runningRef  = useRef(false);
+  const prevFreqRef = useRef(0);
   const [note, setNote] = useState("—");
 
   const ingestChunk = useCallback((samples: number[]) => {
     let energy = 0;
     for (const s of samples) energy += s * s;
     if (energy / samples.length < 1e-6) return;
-
     const buf = bufferRef.current;
     const len = samples.length;
     if (len >= BUFFER_LEN) buf.set(samples.slice(len - BUFFER_LEN));
@@ -114,9 +119,11 @@ export default function DashboardAudio() {
     const re = new Float32Array(bufferRef.current);
     const im = new Float32Array(BUFFER_LEN);
     fft(re, im);
+
     const mags = new Float32Array(BUFFER_LEN / 2);
     for (let i = 0; i < mags.length; i++) mags[i] = Math.sqrt(re[i]**2 + im[i]**2);
 
+    // ── Pitch detection (full spectrum) ───────────────────────────────────
     const { index: hpsIdx, strength } = computeHPS(mags);
     const refined = refinePeak(mags, hpsIdx);
     const freqHPS = (refined * SAMPLE_RATE) / BUFFER_LEN;
@@ -132,13 +139,32 @@ export default function DashboardAudio() {
     prevFreqRef.current = freq;
     setNote(freqToNote(freq));
 
+    // ── FFT display (limited to MAX_DISPLAY_HZ) ───────────────────────────
+    // Hz per bin = SAMPLE_RATE / BUFFER_LEN  ≈ 23.4 Hz
+    // Limiting to MAX_DISPLAY_HZ means the playable guitar/bass range
+    // fills the full canvas width instead of sitting in a thin sliver.
+    const displayBins = Math.min(
+      mags.length,
+      Math.ceil(MAX_DISPLAY_HZ * BUFFER_LEN / SAMPLE_RATE),
+    );
+
     ctx.clearRect(0, 0, W, H);
-    const barWidth = W / mags.length;
-    for (let i = 0; i < mags.length; i++) {
+
+    // Subtle frequency axis markers at 500 Hz intervals
+    ctx.strokeStyle = "rgba(255,255,255,0.06)";
+    ctx.lineWidth = 0.5;
+    for (let hz = 500; hz < MAX_DISPLAY_HZ; hz += 500) {
+      const x = (hz / MAX_DISPLAY_HZ) * W;
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+    }
+
+    const barWidth = W / displayBins;
+    for (let i = 0; i < displayBins; i++) {
       const h = (mags[i] / 50) * H;
-      ctx.fillStyle = "#99ffcc";
+      ctx.fillStyle = "#00ffcc";
       ctx.fillRect(i * barWidth, H - h, barWidth, h);
     }
+
     if (runningRef.current) animRef.current = requestAnimationFrame(draw);
   }, []);
 
@@ -165,8 +191,6 @@ export default function DashboardAudio() {
       {!connected ? (
         <div style={{ paddingLeft: "3.5vw" }}>
           <h3>Not Connected</h3>
-
-          {/* Port selector */}
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
             <select
               value={selectedPort}
@@ -178,24 +202,14 @@ export default function DashboardAudio() {
             >
               {ports.length === 0
                 ? <option value="">No ports found</option>
-                : ports.map(p => <option key={p} value={p}>{p}</option>)
-              }
+                : ports.map(p => <option key={p} value={p}>{p}</option>)}
             </select>
-            <button
-              onClick={refreshPorts}
-              title="Refresh ports"
-              style={{
-                background: "transparent", border: "1px solid #555", color: "#aaa",
-                borderRadius: 6, padding: "4px 8px", cursor: "pointer", fontSize: 12,
-              }}
-            >↺</button>
+            <button onClick={refreshPorts} title="Refresh ports" style={{
+              background: "transparent", border: "1px solid #555", color: "#aaa",
+              borderRadius: 6, padding: "4px 8px", cursor: "pointer", fontSize: 12,
+            }}>↺</button>
           </div>
-
-          <button
-            onClick={connect}
-            disabled={!selectedPort}
-            style={{ opacity: selectedPort ? 1 : 0.4 }}
-          >
+          <button onClick={connect} disabled={!selectedPort} style={{ opacity: selectedPort ? 1 : 0.4 }}>
             Connect
           </button>
         </div>
@@ -203,22 +217,14 @@ export default function DashboardAudio() {
         <>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <div style={{ width: 10, height: 10, borderRadius: "50%", background: "lime" }} />
-            <div style={{paddingTop: "10px"}}><h4>Connected - {selectedPort}</h4></div>
-            
-            <button
-              onClick={handleDisconnect}
-              style={{
-                fontSize: 11, background: "transparent", border: "1px solid #555",
-                color: "#aaa", borderRadius: 6, padding: "4px 8px", cursor: "pointer", marginTop: "7px",
-              }}
-            >
-              Disconnect
-            </button>
+            <h3>Connected — {selectedPort}</h3>
+            <button onClick={handleDisconnect} style={{
+              fontSize: 11, background: "transparent", border: "1px solid #555",
+              color: "#aaa", borderRadius: 6, padding: "2px 8px", cursor: "pointer",
+            }}>Disconnect</button>
           </div>
-
           <canvas ref={canvasRef} width={300} height={120} />
-
-          <div style={{ marginTop: 10, fontSize: 50, fontWeight: "bold", color: "#AFA9EC" }}>
+          <div style={{ marginTop: 10, fontSize: 30, fontWeight: "bold", color: "#AFA9EC" }}>
             {note}
           </div>
         </>

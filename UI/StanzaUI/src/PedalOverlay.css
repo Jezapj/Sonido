@@ -20,12 +20,11 @@
   display: flex;
   flex-direction: column;
   width: min(860px, 90vw);
-  /* Fill up to 88vh but never require scrolling — content scales to fit */
   height: 30vh;
   background: #0d0b12;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 20px;
-  overflow: hidden;           /* no scrollbar ever shown */
+  overflow: hidden;
   box-shadow: 0 40px 100px rgba(0, 0, 0, 0.85);
 }
 
@@ -197,6 +196,7 @@
 .po-knob__svg {
   display: block;
   transition: filter 0.15s ease;
+  touch-action: none; /* prevent scroll while dragging on touchscreen */
 }
 
 .po-knob__svg:hover {
@@ -228,4 +228,73 @@
   .po-header__title { font-size: 17px; }
   .po-body { padding: 1rem 1rem 0.5rem; }
   .po-knobs-grid { gap: 1rem; }
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   LIGHT MODE OVERRIDES
+   ══════════════════════════════════════════════════════════════════ */
+
+[data-theme="light"] .po-overlay {
+  background: rgba(210, 205, 230, 0.72);
+}
+
+[data-theme="light"] .po-panel {
+  background: #f5f2fa;
+  border-color: rgba(132, 0, 255, 0.15);
+  box-shadow: 0 40px 100px rgba(0, 0, 0, 0.18);
+}
+
+[data-theme="light"] .po-header {
+  background: #ede8f6;
+  border-bottom-color: rgba(132, 0, 255, 0.1);
+}
+
+[data-theme="light"] .po-header__tag {
+  color: rgba(100, 0, 200, 0.55);
+}
+
+[data-theme="light"] .po-header__title {
+  color: #1a0f2e;
+}
+
+[data-theme="light"] .po-header__img {
+  border-color: rgba(132, 0, 255, 0.15);
+}
+
+[data-theme="light"] .po-toggle--on {
+  background: rgba(34, 197, 94, 0.14);
+  border-color: rgba(34, 197, 94, 0.45);
+  color: #166534;
+}
+
+[data-theme="light"] .po-toggle--off {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.35);
+  color: #dc2626;
+}
+
+[data-theme="light"] .po-toggle--on  .po-toggle__dot { background: #22c55e; }
+[data-theme="light"] .po-toggle--off .po-toggle__dot { background: #ef4444; }
+
+[data-theme="light"] .po-close {
+  background: rgba(0, 0, 0, 0.05);
+  border-color: rgba(0, 0, 0, 0.12);
+  color: rgba(0, 0, 0, 0.35);
+}
+
+[data-theme="light"] .po-close:hover {
+  background: rgba(0, 0, 0, 0.10);
+  color: rgba(0, 0, 0, 0.7);
+}
+
+[data-theme="light"] .po-knob__label {
+  color: rgba(26, 15, 46, 0.45);
+}
+
+[data-theme="light"] .po-knob__value {
+  color: rgba(26, 15, 46, 0.72);
+}
+
+[data-theme="light"] .po-hint {
+  color: rgba(26, 15, 46, 0.18);
 }

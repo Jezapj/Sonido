@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react';
 import type { PedalState } from './PedalOverlay';
-import { useIsLightMode } from './useTheme';
+import { useIsLightMode } from './UseTheme';
 
 export interface PresetsCardProps {
   pedalStates: Record<string, PedalState>;
