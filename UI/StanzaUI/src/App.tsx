@@ -11,6 +11,7 @@ import ModelViewer from './ModelViewer';
 import CircularText from './CircularText';
 import Profile from './Profile';
 import Settings from './Settings';
+import TextType from './TextType';
 
 type Theme = 'dark' | 'light';
 
@@ -128,7 +129,20 @@ function App() {
       {view === "landing" && (<>
         <button onClick={handleToggle} style={{ position: 'fixed', top: 20, right: 20, zIndex: 1 }}> Toggle Fullscreen</button>
         <main className="container">
-          <h1>Interactive Audio DSP</h1>
+          <TextType 
+          // text={["Interactive Audio DSP"]}
+          typingSpeed={75}
+          pauseDuration={1500}
+          showCursor
+          cursorCharacter="_"
+          text={["Interactive Audio DSP","Build the prefect sound."]}
+          deletingSpeed={50}
+          
+          variableSpeedMin={60}
+          variableSpeedMax={120}
+          cursorBlinkDuration={0.5}
+        />
+          {/* <h1>Interactive Audio DSP</h1> */}
           <div className="row">
             <img src="/STANZA_W_TP.png" />
           </div>
