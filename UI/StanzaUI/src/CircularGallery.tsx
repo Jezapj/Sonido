@@ -130,12 +130,12 @@ class Media {
   scale!: number; padding!: number; width!: number; widthTotal!: number; x!: number;
   program!: Program; plane!: Mesh; title!: Title;
 
-  geometry: Plane | undefined; gl: GL | undefined; image: string | undefined; index: number | undefined; length: number | undefined;
-  renderer: Renderer | undefined; scene : Transform | undefined;
-  screen: { width: number ; height: number } | undefined;
-  text: string | undefined;
-  viewport: { width: number; height: number } | undefined;
-  bend: number | undefined; textColor: string | undefined; borderRadius: number; font?: string;
+  geometry!: Plane; gl!: GL ; image!: string ; index!: number ; length!: number;
+  renderer!: Renderer; scene! : Transform;
+  screen!: { width: number ; height: number };
+  text!: string;
+  viewport!: { width: number; height: number };
+  bend!: number; textColor!: string; borderRadius: number; font?: string;
 
   constructor(props: MediaProps) {
     Object.assign(this, props);

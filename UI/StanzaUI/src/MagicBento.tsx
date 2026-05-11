@@ -475,7 +475,7 @@ const MagicBento: React.FC<BentoProps> = ({
     ...dynamicCards,
   ], [dynamicCards]);
 
-  const baseClassName = (card: BentoCardProps) =>
+  const baseClassName = () =>
     `magic-bento-card ${textAutoHide ? 'magic-bento-card--text-autohide' : ''} ${enableBorderGlow ? 'magic-bento-card--border-glow' : ''}`;
 
   const cardStyle = (card: BentoCardProps): React.CSSProperties => ({
@@ -501,7 +501,7 @@ const MagicBento: React.FC<BentoProps> = ({
           enableStars ? (
             <ParticleCard
               key={index}
-              className={baseClassName(card)}
+              className={baseClassName()}
               style={cardStyle(card)}
               disableAnimations={shouldDisableAnimations}
               particleCount={particleCount}
@@ -513,7 +513,7 @@ const MagicBento: React.FC<BentoProps> = ({
               <CardInner card={card} />
             </ParticleCard>
           ) : (
-            <div key={index} className={baseClassName(card)} style={cardStyle(card)}>
+            <div key={index} className={baseClassName()} style={cardStyle(card)}>
               <CardInner card={card} />
             </div>
           )
