@@ -1,7 +1,8 @@
-import { useRef, useState, useCallback } from "react";
+import { useRef, useState, useCallback, useEffect } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { useSerialStream } from "./useSerialStream";
 
-const BUFFER_LEN  = 2048;
+const BUFFER_LEN  = 4096;
 const SAMPLE_RATE = 47991;
 
 // Pitch detection window — fundamentals only
@@ -9,8 +10,6 @@ const MIN_FREQ = 70;
 const MAX_FREQ = 400;
 
 // FFT display cutoff — shows harmonics up to this frequency.
-// Guitar/bass fundamentals sit in ~80–1320 Hz; showing up to 4 kHz
-// makes that range fill the canvas instead of squashing into the left edge.
 const MAX_DISPLAY_HZ = 4000;
 
 // ── FFT ──────────────────────────────────────────────────────────────────────
@@ -91,6 +90,21 @@ function freqToNote(freq: number) {
   return `${names[idx]}${octave}`;
 }
 
+// ── Shared button style ───────────────────────────────────────────────────────
+const btnBase: React.CSSProperties = {
+  background: "transparent",
+  border: "0.5px solid rgba(255,255,255,0.25)",
+  color: "#ffffff",
+  borderRadius: 8,
+  padding: "4px 10px",
+  fontSize: 11,
+  fontFamily: "monospace",
+  cursor: "pointer",
+  letterSpacing: "0.04em",
+  transition: "background 0.15s, border-color 0.15s, color 0.15s",
+  whiteSpace: "nowrap" as const,
+};
+
 // ── Component ─────────────────────────────────────────────────────────────────
 export default function DashboardAudio() {
   const canvasRef   = useRef<HTMLCanvasElement>(null);
@@ -100,6 +114,94 @@ export default function DashboardAudio() {
   const prevFreqRef = useRef(0);
   const [note, setNote] = useState("—");
 
+  // ── Frontend audio monitoring (Web Audio API) ─────────────────────────────
+  const [isMonitoring, setIsMonitoring]   = useState(false);
+  const isMonitoringRef                   = useRef(false);
+  const audioCtxRef                       = useRef<AudioContext | null>(null);
+  const nextStartTimeRef                  = useRef<number>(0);
+
+  // ── Hardware output mute ───────────────────────────────────────────────────
+  const [isMuted,       setIsMuted]       = useState(false);
+  const [muteLoading,   setMuteLoading]   = useState(false);
+
+  // Keep monitoring ref in sync and tear down AudioContext when toggled off
+  useEffect(() => {
+    isMonitoringRef.current = isMonitoring;
+    if (!isMonitoring) {
+      audioCtxRef.current?.close().catch(() => {});
+      audioCtxRef.current    = null;
+      nextStartTimeRef.current = 0;
+    }
+  }, [isMonitoring]);
+
+  // Cleanup AudioContext on unmount
+  useEffect(() => {
+    return () => {
+      audioCtxRef.current?.close().catch(() => {});
+    };
+  }, []);
+
+  /**
+   * Schedule a Float32 chunk into the Web Audio API graph.
+   * Uses tight lookahead scheduling so chunks play gaplessly; resyncs if
+   * the buffer drifts more than 200 ms ahead (e.g. after a tab sleep).
+   */
+  const scheduleAudioChunk = useCallback((samples: number[]) => {
+    if (!isMonitoringRef.current) return;
+
+    // Lazily create the AudioContext on the first chunk after the user
+    // has toggled monitoring on (satisfies browser autoplay policy because
+    // the toggle button click counts as a user gesture).
+    if (!audioCtxRef.current || audioCtxRef.current.state === "closed") {
+      try {
+        audioCtxRef.current  = new AudioContext({ sampleRate: SAMPLE_RATE });
+        nextStartTimeRef.current = 0;
+      } catch {
+        return; // Browser blocked — silently skip
+      }
+    }
+
+    const ctx = audioCtxRef.current;
+    if (ctx.state === "suspended") ctx.resume().catch(() => {});
+
+    const floats = new Float32Array(samples);
+    const buf    = ctx.createBuffer(1, floats.length, SAMPLE_RATE);
+    buf.getChannelData(0).set(floats);
+
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(ctx.destination);
+
+    const now = ctx.currentTime;
+    // If our schedule head has drifted too far forward (e.g. tab was hidden),
+    // snap it back to now + a small startup buffer (50 ms).
+    if (nextStartTimeRef.current > now + 0.2) {
+      nextStartTimeRef.current = now + 0.05;
+    }
+    const startAt = Math.max(nextStartTimeRef.current, now + 0.02);
+    src.start(startAt);
+    nextStartTimeRef.current = startAt + buf.duration;
+  }, []);
+
+  /**
+   * Toggle the hardware DAC output mute by sending a zero / restored pre_gain
+   * packet to the ESP32 EQ pedal via the `set_output_mute` Tauri command.
+   * The Rust side tracks the original pre_gain so unmuting restores it exactly.
+   */
+  const toggleHardwareMute = useCallback(async () => {
+    const next = !isMuted;
+    setMuteLoading(true);
+    try {
+      await invoke<void>("set_output_mute", { muted: next });
+      setIsMuted(next);
+    } catch (e) {
+      console.warn("[DashboardAudio] set_output_mute failed:", e);
+    } finally {
+      setMuteLoading(false);
+    }
+  }, [isMuted]);
+
+  // ── Core audio ingest ──────────────────────────────────────────────────────
   const ingestChunk = useCallback((samples: number[]) => {
     let energy = 0;
     for (const s of samples) energy += s * s;
@@ -110,6 +212,7 @@ export default function DashboardAudio() {
     else { buf.copyWithin(0, len); buf.set(samples, BUFFER_LEN - len); }
   }, []);
 
+  // ── Draw loop (FFT + pitch) ────────────────────────────────────────────────
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -123,7 +226,6 @@ export default function DashboardAudio() {
     const mags = new Float32Array(BUFFER_LEN / 2);
     for (let i = 0; i < mags.length; i++) mags[i] = Math.sqrt(re[i]**2 + im[i]**2);
 
-    // ── Pitch detection (full spectrum) ───────────────────────────────────
     const { index: hpsIdx, strength } = computeHPS(mags);
     const refined = refinePeak(mags, hpsIdx);
     const freqHPS = (refined * SAMPLE_RATE) / BUFFER_LEN;
@@ -139,10 +241,6 @@ export default function DashboardAudio() {
     prevFreqRef.current = freq;
     setNote(freqToNote(freq));
 
-    // ── FFT display (limited to MAX_DISPLAY_HZ) ───────────────────────────
-    // Hz per bin = SAMPLE_RATE / BUFFER_LEN  ≈ 23.4 Hz
-    // Limiting to MAX_DISPLAY_HZ means the playable guitar/bass range
-    // fills the full canvas width instead of sitting in a thin sliver.
     const displayBins = Math.min(
       mags.length,
       Math.ceil(MAX_DISPLAY_HZ * BUFFER_LEN / SAMPLE_RATE),
@@ -150,7 +248,6 @@ export default function DashboardAudio() {
 
     ctx.clearRect(0, 0, W, H);
 
-    // Subtle frequency axis markers at 500 Hz intervals
     ctx.strokeStyle = "rgba(255,255,255,0.06)";
     ctx.lineWidth = 0.5;
     for (let hz = 500; hz < MAX_DISPLAY_HZ; hz += 500) {
@@ -168,13 +265,15 @@ export default function DashboardAudio() {
     if (runningRef.current) animRef.current = requestAnimationFrame(draw);
   }, []);
 
+  // ── Unified chunk handler wired to the serial stream ──────────────────────
   const onChunk = useCallback((samples: number[]) => {
     ingestChunk(samples);
+    scheduleAudioChunk(samples); // no-op when monitoring is off
     if (!runningRef.current) {
       runningRef.current = true;
       animRef.current = requestAnimationFrame(draw);
     }
-  }, [ingestChunk, draw]);
+  }, [ingestChunk, scheduleAudioChunk, draw]);
 
   const { ports, selectedPort, setSelectedPort, connected, connect, disconnect, refreshPorts } =
     useSerialStream(onChunk);
@@ -183,9 +282,16 @@ export default function DashboardAudio() {
     runningRef.current = false;
     cancelAnimationFrame(animRef.current);
     bufferRef.current.fill(0);
+    // Stop monitoring and restore hardware mute state on disconnect
+    setIsMonitoring(false);
+    if (isMuted) {
+      invoke<void>("set_output_mute", { muted: false }).catch(() => {});
+      setIsMuted(false);
+    }
     disconnect();
   };
 
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div style={{ position: "absolute", bottom: 15, left: 10, color: "white" }}>
       {!connected ? (
@@ -215,15 +321,63 @@ export default function DashboardAudio() {
         </div>
       ) : (
         <>
+          {/* ── Status row ──────────────────────────────────────────────── */}
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <div style={{ width: 10, height: 10, borderRadius: "50%", background: "lime" }} />
-            <h3>Connected — {selectedPort}</h3>
-            <button onClick={handleDisconnect} style={{
-              fontSize: 11, background: "transparent", border: "1px solid #555",
-              color: "#aaa", borderRadius: 6, padding: "2px 8px", cursor: "pointer",
-            }}>Disconnect</button>
+            <div style={{ width: 10, height: 10, borderRadius: "50%", background: "lime", flexShrink: 0 }} />
+            <h4 style={{ margin: 0 }}>Connected: {selectedPort}</h4>
+            <button
+              onClick={handleDisconnect}
+              style={{ ...btnBase, fontSize: 11, padding: "2px 8px" }}
+            >
+              Disconnect
+            </button>
           </div>
+
+          {/* ── Monitor & Mute controls ──────────────────────────────────── */}
+          <div style={{ display: "flex", gap: 6, marginTop: 10, marginBottom: "-10px" }}>
+            {/* Frontend monitor toggle — plays audio through computer speakers */}
+            <button
+              onClick={() => setIsMonitoring(v => !v)}
+              title={isMonitoring
+                ? "Stop playing audio through this device"
+                : "Play incoming audio through this device's speakers"}
+              style={{
+                ...btnBase,
+                borderColor: isMonitoring
+                  ? "rgba(175,169,236,0.7)"
+                  : "rgba(255,255,255,0.25)",
+                color: isMonitoring ? "#AFA9EC" : "rgba(255,255,255,0.55)",
+                background: isMonitoring ? "rgba(175,169,236,0.12)" : "transparent",
+              }}
+            >
+              {isMonitoring ? "👂 Monitor: ON" : "👂 Monitor: OFF"}
+            </button>
+
+            {/* Hardware DAC mute — zeros pre_gain on the ESP32 EQ pedal */}
+            <button
+              onClick={toggleHardwareMute}
+              disabled={muteLoading}
+              title={isMuted
+                ? "Restore hardware speaker output"
+                : "Silence the hardware speaker output (ESP32 DAC)"}
+              style={{
+                ...btnBase,
+                opacity: muteLoading ? 0.5 : 1,
+                borderColor: isMuted
+                  ? "rgba(239,68,68,0.7)"
+                  : "rgba(255,255,255,0.25)",
+                color: isMuted ? "#ef4444" : "rgba(255,255,255,0.55)",
+                background: isMuted ? "rgba(239,68,68,0.10)" : "transparent",
+              }}
+            >
+              {isMuted ? "🔇 HW: Muted" : "🔊 HW: Live"}
+            </button>
+          </div>
+
+          {/* ── FFT canvas ──────────────────────────────────────────────── */}
           <canvas ref={canvasRef} width={300} height={120} />
+
+          {/* ── Detected note ───────────────────────────────────────────── */}
           <div style={{ marginTop: 10, fontSize: 30, fontWeight: "bold", color: "#AFA9EC" }}>
             {note}
           </div>

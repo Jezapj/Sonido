@@ -25,6 +25,7 @@ type GL = Renderer['gl'];
 
 const DEFAULT_ITEMS: GalleryItem[] = [
   { image: `/L_Reverb(Spring)_pedal.png`,  text: 'Bridge' },
+  { image: `/Chorus_pedal.png`,  text: 'Budapest' },
   { image: `L_Distortion_pedal.png`,  text: 'Strawberries' },
   { image: `/L_EQPreGain_pedal.png`,  text: 'Blurry Lights' },
   { image: `/L_OD_pedal.png`,  text: 'New York' },

@@ -3,18 +3,19 @@ import type { PedalState } from './PedalOverlay';
 import { useIsLightMode } from './UseTheme';
 
 export interface PresetsCardProps {
-  pedalStates: Record<string, PedalState>;
-  onLoad: (states: Record<string, PedalState>) => void;
+  pedalStates:     Record<string, PedalState>;
+  onLoad:          (states: Record<string, PedalState>) => void;
+  onPresetSaved?:  () => void;
 }
 
 interface PresetFile {
   version: number;
   savedAt: string;
   appName: string;
-  pedals: Record<string, PedalState>;
+  pedals:  Record<string, PedalState>;
 }
 
-const PresetsCard: React.FC<PresetsCardProps> = ({ pedalStates, onLoad }) => {
+const PresetsCard: React.FC<PresetsCardProps> = ({ pedalStates, onLoad, onPresetSaved }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [status, setStatus] = useState<{ msg: string; ok: boolean } | null>(null);
   const light = useIsLightMode();
@@ -34,7 +35,7 @@ const PresetsCard: React.FC<PresetsCardProps> = ({ pedalStates, onLoad }) => {
         version: 1,
         savedAt: new Date().toISOString(),
         appName: 'StanzaUI',
-        pedals: pedalStates,
+        pedals:  pedalStates,
       };
       const json = JSON.stringify(payload, null, 2);
       const blob = new Blob([json], { type: 'application/json' });
@@ -47,6 +48,7 @@ const PresetsCard: React.FC<PresetsCardProps> = ({ pedalStates, onLoad }) => {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
       flash('Preset saved ✓', true);
+      onPresetSaved?.();            // notify parent so it can increment the counter
     } catch {
       flash('Save failed', false);
     }
@@ -58,7 +60,7 @@ const PresetsCard: React.FC<PresetsCardProps> = ({ pedalStates, onLoad }) => {
     const reader = new FileReader();
     reader.onload = ev => {
       try {
-        const raw = JSON.parse(ev.target?.result as string);
+        const raw    = JSON.parse(ev.target?.result as string);
         const states: Record<string, PedalState> = raw.pedals ?? raw;
         if (typeof states !== 'object' || states === null) throw new Error();
         onLoad(states);
@@ -74,25 +76,25 @@ const PresetsCard: React.FC<PresetsCardProps> = ({ pedalStates, onLoad }) => {
   };
 
   const c = {
-    summaryText:       light ? 'rgba(0,0,0,0.4)'      : 'rgba(255,255,255,0.28)',
-    emptyText:         light ? 'rgba(0,0,0,0.35)'     : 'rgba(255,255,255,0.2)',
-    pillActiveBg:      light ? 'rgba(34,197,94,0.12)' : 'rgba(34,197,94,0.12)',
-    pillActiveBorder:  light ? 'rgba(34,197,94,0.4)'  : 'rgba(34,197,94,0.3)',
-    pillActiveText:    light ? '#166534'              : '#22c55e',
-    pillInactiveBg:    light ? 'rgba(0,0,0,0.05)'     : 'rgba(255,255,255,0.05)',
-    pillInactiveBorder:light ? 'rgba(0,0,0,0.1)'      : 'rgba(255,255,255,0.08)',
-    pillInactiveText:  light ? 'rgba(0,0,0,0.35)'     : 'rgba(255,255,255,0.25)',
-    statusOk:          light ? '#166534'              : '#22c55e',
-    statusErr:         light ? '#dc2626'              : '#ef4444',
-    saveBg:            light ? 'rgba(132,0,255,0.10)' : 'rgba(132,0,255,0.18)',
-    saveBgHover:       light ? 'rgba(132,0,255,0.22)' : 'rgba(132,0,255,0.32)',
-    saveBorder:        light ? 'rgba(132,0,255,0.4)'  : 'rgba(132,0,255,0.45)',
-    saveText:          light ? 'rgba(90,0,200,0.9)'   : 'rgba(200,160,255,0.95)',
-    loadBg:            light ? 'rgba(0,0,0,0.05)'     : 'rgba(255,255,255,0.05)',
-    loadBgHover:       light ? 'rgba(0,0,0,0.1)'      : 'rgba(255,255,255,0.10)',
-    loadBorder:        light ? 'rgba(0,0,0,0.15)'     : 'rgba(255,255,255,0.12)',
-    loadText:          light ? 'rgba(0,0,0,0.55)'     : 'rgba(255,255,255,0.55)',
-    loadTextHover:     light ? 'rgba(0,0,0,0.85)'     : 'rgba(255,255,255,0.8)',
+    summaryText:        light ? 'rgba(0,0,0,0.4)'      : 'rgba(255,255,255,0.28)',
+    emptyText:          light ? 'rgba(0,0,0,0.35)'     : 'rgba(255,255,255,0.2)',
+    pillActiveBg:       light ? 'rgba(34,197,94,0.12)' : 'rgba(34,197,94,0.12)',
+    pillActiveBorder:   light ? 'rgba(34,197,94,0.4)'  : 'rgba(34,197,94,0.3)',
+    pillActiveText:     light ? '#166534'               : '#22c55e',
+    pillInactiveBg:     light ? 'rgba(0,0,0,0.05)'     : 'rgba(255,255,255,0.05)',
+    pillInactiveBorder: light ? 'rgba(0,0,0,0.1)'      : 'rgba(255,255,255,0.08)',
+    pillInactiveText:   light ? 'rgba(0,0,0,0.35)'     : 'rgba(255,255,255,0.25)',
+    statusOk:           light ? '#166534'               : '#22c55e',
+    statusErr:          light ? '#dc2626'               : '#ef4444',
+    saveBg:             light ? 'rgba(132,0,255,0.10)'  : 'rgba(132,0,255,0.18)',
+    saveBgHover:        light ? 'rgba(132,0,255,0.22)'  : 'rgba(132,0,255,0.32)',
+    saveBorder:         light ? 'rgba(132,0,255,0.4)'   : 'rgba(132,0,255,0.45)',
+    saveText:           light ? 'rgba(90,0,200,0.9)'    : 'rgba(200,160,255,0.95)',
+    loadBg:             light ? 'rgba(0,0,0,0.05)'      : 'rgba(255,255,255,0.05)',
+    loadBgHover:        light ? 'rgba(0,0,0,0.1)'       : 'rgba(255,255,255,0.10)',
+    loadBorder:         light ? 'rgba(0,0,0,0.15)'      : 'rgba(255,255,255,0.12)',
+    loadText:           light ? 'rgba(0,0,0,0.55)'      : 'rgba(255,255,255,0.55)',
+    loadTextHover:      light ? 'rgba(0,0,0,0.85)'      : 'rgba(255,255,255,0.8)',
   };
 
   return (
@@ -104,7 +106,10 @@ const PresetsCard: React.FC<PresetsCardProps> = ({ pedalStates, onLoad }) => {
     }}>
       {totalCount > 0 ? (
         <div style={{ marginBottom: 12 }}>
-          <p style={{ margin: '0 0 7px', fontSize: 11, color: c.summaryText, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+          <p style={{
+            margin: '0 0 7px', fontSize: 11, color: c.summaryText,
+            letterSpacing: '0.08em', textTransform: 'uppercase',
+          }}>
             {activeCount}/{totalCount} active
           </p>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
@@ -112,13 +117,14 @@ const PresetsCard: React.FC<PresetsCardProps> = ({ pedalStates, onLoad }) => {
               <div key={name} title={name} style={{
                 display: 'flex', alignItems: 'center', gap: 5,
                 padding: '3px 9px', borderRadius: 99,
-                background: state.enabled ? c.pillActiveBg    : c.pillInactiveBg,
-                border: `1px solid ${state.enabled ? c.pillActiveBorder : c.pillInactiveBorder}`,
+                background:    state.enabled ? c.pillActiveBg    : c.pillInactiveBg,
+                border:       `1px solid ${state.enabled ? c.pillActiveBorder : c.pillInactiveBorder}`,
                 fontSize: 10, letterSpacing: '0.04em',
-                color: state.enabled ? c.pillActiveText : c.pillInactiveText,
+                color:         state.enabled ? c.pillActiveText  : c.pillInactiveText,
               }}>
                 <span style={{
-                  width: 6, height: 6, borderRadius: '50%', background: 'currentColor', flexShrink: 0,
+                  width: 6, height: 6, borderRadius: '50%',
+                  background: 'currentColor', flexShrink: 0,
                   boxShadow: state.enabled ? '0 0 5px rgba(34,197,94,0.7)' : 'none',
                 }} />
                 {name}
@@ -133,7 +139,11 @@ const PresetsCard: React.FC<PresetsCardProps> = ({ pedalStates, onLoad }) => {
       )}
 
       {status && (
-        <p style={{ margin: '0 0 8px', fontSize: 11, fontWeight: 600, letterSpacing: '0.04em', color: status.ok ? c.statusOk : c.statusErr }}>
+        <p style={{
+          margin: '0 0 8px', fontSize: 11, fontWeight: 600,
+          letterSpacing: '0.04em',
+          color: status.ok ? c.statusOk : c.statusErr,
+        }}>
           {status.msg}
         </p>
       )}
@@ -167,7 +177,11 @@ const PresetsCard: React.FC<PresetsCardProps> = ({ pedalStates, onLoad }) => {
           }}
         >↑ Load</button>
 
-        <input ref={fileInputRef} type="file" accept=".json" style={{ display: 'none' }} onChange={handleFileChange} />
+        <input
+          ref={fileInputRef} type="file" accept=".json"
+          style={{ display: 'none' }}
+          onChange={handleFileChange}
+        />
       </div>
     </div>
   );

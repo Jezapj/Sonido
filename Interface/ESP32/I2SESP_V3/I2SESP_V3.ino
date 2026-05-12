@@ -5,7 +5,9 @@
 extern "C" {
     #include "pedal_registry.h"
     #include "pedal_eq.h"
+    #include "pedal_chorus.h"
     #include "pedal_od.h"
+    
     /*
      * To add a new pedal:
      *   1. Create pedal_xyz.c / pedal_xyz.h in this folder.
@@ -19,8 +21,9 @@ extern "C" {
 // ── Pedal slot IDs ────────────────────────────────────────────────────────────
 // Must match PEDAL_IDS in PedalOverlay.tsx and pedal_id values in lib.rs.
 #define PEDAL_EQ_PREGAIN  0
-#define PEDAL_OVERDRIVE   1   // uncomment when pedal_od.c is added
-// #define PEDAL_REVERB      2   // uncomment when pedal_reverb.c is added
+#define PEDAL_CHORUS   1
+#define PEDAL_OVERDRIVE   2   // uncomment when pedal_od.c is added
+// #define PEDAL_REVERB      3   // uncomment when pedal_reverb.c is added
 
 // ── Audio config ──────────────────────────────────────────────────────────────
 #define SAMPLE_RATE 47991
@@ -141,6 +144,7 @@ void setup()
 
     // ── Register pedals ───────────────────────────────────────────────────────
     pedal_eq_init(PEDAL_EQ_PREGAIN, (float)SAMPLE_RATE);
+    pedal_chorus_init(PEDAL_CHORUS, (float)SAMPLE_RATE);
     pedal_od_init(PEDAL_OVERDRIVE, (float)SAMPLE_RATE);     // future
     // pedal_reverb_init(PEDAL_REVERB, (float)SAMPLE_RATE);    // future
 

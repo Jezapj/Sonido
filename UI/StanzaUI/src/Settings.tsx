@@ -1,23 +1,52 @@
-import React, { useState } from 'react';
+import React from 'react';
 import './Settings.css';
 
 type Theme = 'dark' | 'light';
 
-interface SettingsProps {
-  theme: Theme;
-  onThemeChange: (t: Theme) => void;
-  username: string;
+// ── Shared settings shape ─────────────────────────────────────────────────────
+// Exported so App.tsx can own the state and pass it down.
+
+export interface AppSettings {
+  animations:  boolean;       // Card hover effects / tilt — maps to MagicBento disableAnimations (inverted)
+  particles:   boolean;       // Star particles on card hover — maps to MagicBento enableStars
+  parallax:    boolean;       // Mouse-reactive floating lines — maps to FloatingLines parallax
+  dockMag:     number;        // Dock icon magnification on hover — maps to Dock magnification
+  gridSpeed:   number;        // ShapeGrid animation speed (slider 1–20 → speed 0.1–2.0)
+  audioBuffer: 512 | 1024;   // ESP32 DMA buffer size preference (takes effect on firmware recompile)
 }
+
+export const DEFAULT_SETTINGS: AppSettings = {
+  animations:  true,
+  particles:   true,
+  parallax:    true,
+  dockMag:     200,
+  gridSpeed:   5,
+  audioBuffer: 1024,
+};
+
+// ── Props ─────────────────────────────────────────────────────────────────────
+
+interface SettingsProps {
+  theme:            Theme;
+  onThemeChange:    (t: Theme) => void;
+  username:         string;
+  settings:         AppSettings;
+  onSettingsChange: <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => void;
+}
+
+// ── Sub-components ────────────────────────────────────────────────────────────
 
 interface ToggleProps {
-  checked: boolean;
-  onChange: (v: boolean) => void;
-  label: string;
+  checked:     boolean;
+  onChange:    (v: boolean) => void;
+  label:       string;
   description?: string;
-  accent?: string;
+  accent?:     string;
 }
 
-const Toggle: React.FC<ToggleProps> = ({ checked, onChange, label, description, accent = '132, 0, 255' }) => (
+const Toggle: React.FC<ToggleProps> = ({
+  checked, onChange, label, description, accent = '132, 0, 255',
+}) => (
   <label className="settings-toggle-row">
     <div className="settings-toggle-text">
       <span className="settings-toggle-label">{label}</span>
@@ -27,7 +56,10 @@ const Toggle: React.FC<ToggleProps> = ({ checked, onChange, label, description, 
       role="switch"
       aria-checked={checked}
       className={`settings-toggle${checked ? ' settings-toggle--on' : ''}`}
-      style={{ '--toggle-accent': `rgba(${accent}, 1)`, '--toggle-glow': `rgba(${accent}, 0.4)` } as React.CSSProperties}
+      style={{
+        '--toggle-accent': `rgba(${accent}, 1)`,
+        '--toggle-glow':   `rgba(${accent}, 0.4)`,
+      } as React.CSSProperties}
       onClick={() => onChange(!checked)}
     >
       <span className="settings-toggle__thumb" />
@@ -36,17 +68,19 @@ const Toggle: React.FC<ToggleProps> = ({ checked, onChange, label, description, 
 );
 
 interface SliderProps {
-  label: string;
+  label:        string;
   description?: string;
-  value: number;
-  min: number;
-  max: number;
-  step?: number;
-  unit?: string;
-  onChange: (v: number) => void;
+  value:        number;
+  min:          number;
+  max:          number;
+  step?:        number;
+  unit?:        string;
+  onChange:     (v: number) => void;
 }
 
-const Slider: React.FC<SliderProps> = ({ label, description, value, min, max, step = 1, unit = '', onChange }) => (
+const Slider: React.FC<SliderProps> = ({
+  label, description, value, min, max, step = 1, unit = '', onChange,
+}) => (
   <div className="settings-slider-row">
     <div className="settings-toggle-text">
       <span className="settings-toggle-label">{label}</span>
@@ -70,13 +104,13 @@ const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title
   </div>
 );
 
-const Settings: React.FC<SettingsProps> = ({ theme, onThemeChange, username }) => {
-  const [animations, setAnimations] = useState(true);
-  const [particles, setParticles] = useState(true);
-  const [parallax, setParallax] = useState(true);
-  const [dockMag, setDockMag] = useState(200);
-  const [gridSpeed, setGridSpeed] = useState(5);
-  const [audioBuffer, setAudioBuffer] = useState(1024);
+// ── Main component ────────────────────────────────────────────────────────────
+
+const Settings: React.FC<SettingsProps> = ({
+  theme, onThemeChange, username, settings, onSettingsChange,
+}) => {
+  const set = <K extends keyof AppSettings>(key: K) =>
+    (value: AppSettings[K]) => onSettingsChange(key, value);
 
   return (
     <div className="settings-page">
@@ -86,7 +120,10 @@ const Settings: React.FC<SettingsProps> = ({ theme, onThemeChange, username }) =
           <div className="settings-header__icon">⚙</div>
           <div>
             <h2 className="settings-header__title">Settings</h2>
-            <p className="settings-header__sub">Signed in as <span className="settings-header__user">{username || 'Unknown'}</span></p>
+            <p className="settings-header__sub">
+              Signed in as{' '}
+              <span className="settings-header__user">{username || 'Unknown'}</span>
+            </p>
           </div>
         </div>
 
@@ -117,20 +154,20 @@ const Settings: React.FC<SettingsProps> = ({ theme, onThemeChange, username }) =
               </div>
             </div>
             <Toggle
-              checked={animations}
-              onChange={setAnimations}
+              checked={settings.animations}
+              onChange={set('animations')}
               label="UI Animations"
               description="Card hover effects, particles, tilt"
             />
             <Toggle
-              checked={particles}
-              onChange={setParticles}
+              checked={settings.particles}
+              onChange={set('particles')}
               label="Particle Effects"
               description="Star particles on card hover"
             />
             <Toggle
-              checked={parallax}
-              onChange={setParallax}
+              checked={settings.parallax}
+              onChange={set('parallax')}
               label="Parallax Background"
               description="Mouse-reactive floating lines"
             />
@@ -141,12 +178,12 @@ const Settings: React.FC<SettingsProps> = ({ theme, onThemeChange, username }) =
             <Slider
               label="Magnification"
               description="Max icon size on hover"
-              value={dockMag}
+              value={settings.dockMag}
               min={60}
               max={300}
               step={10}
               unit="px"
-              onChange={setDockMag}
+              onChange={set('dockMag')}
             />
           </Section>
 
@@ -155,25 +192,27 @@ const Settings: React.FC<SettingsProps> = ({ theme, onThemeChange, username }) =
             <Slider
               label="Scroll Speed"
               description="ShapeGrid animation speed"
-              value={gridSpeed}
+              value={settings.gridSpeed}
               min={1}
               max={20}
-              onChange={setGridSpeed}
+              onChange={set('gridSpeed')}
             />
           </Section>
 
           {/* ── Audio ── */}
           <Section title="Audio Engine">
             <Toggle
-              checked={audioBuffer === 512}
-              onChange={v => setAudioBuffer(v ? 512 : 1024)}
+              checked={settings.audioBuffer === 512}
+              onChange={v => set('audioBuffer')(v ? 512 : 1024)}
               label="Low-Latency Mode"
-              description="512 samples buffer (may increase CPU load)"
+              description="512 samples buffer (requires firmware recompile)"
               accent="0, 200, 136"
             />
             <div className="settings-info-row">
               <span className="settings-info-label">Buffer Size</span>
-              <span className="settings-info-value settings-info-value--mono">{audioBuffer} samples</span>
+              <span className="settings-info-value settings-info-value--mono">
+                {settings.audioBuffer} samples
+              </span>
             </div>
             <div className="settings-info-row">
               <span className="settings-info-label">Sample Rate</span>

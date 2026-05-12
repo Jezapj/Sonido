@@ -7,8 +7,9 @@ import './PedalOverlay.css';
 
 export const PEDAL_IDS: Record<string, number> = {
   'Blurry Lights': 0,
-  'New York':      1,
-  'Bridge':        2,
+  'Budapest':      1,
+  'New York':      2,
+  'Bridge':        3,
 };
 
 export interface KnobDef {
@@ -41,6 +42,16 @@ export const PEDAL_DEFS: Record<string, PedalDef> = {
       { key: 'drive', label: 'Drive', min: 0, max: 1, defaultValue: 0.4, decimals: 2 },
       { key: 'tone',  label: 'Tone',  min: 0, max: 1, defaultValue: 0.4, decimals: 2 },
       { key: 'level', label: 'Level', min: 0, max: 1, defaultValue: 0.5, decimals: 2 },
+    ],
+  },
+  'Budapest': {
+    label: 'Chorus',
+    knobs: [
+      { key: 'rate', label: 'Rate', min: 0, max: 1, defaultValue: 0.5, decimals: 2 },
+      { key: 'depth',  label: 'Depth',  min: 0, max: 10, defaultValue: 5, decimals: 2 },
+      { key: 'delay', label: 'Delay', min: 0, max: 40, defaultValue: 20, unit: 'ms', decimals: 2 },
+      { key: 'mix', label: 'Mix', min: 0, max: 1, defaultValue: 0.5,  decimals: 2 },
+      { key: 'feedback', label: 'Feedback', min: 0, max: 1, defaultValue: 0.0, decimals: 2 }
     ],
   },
   'Bridge': {
