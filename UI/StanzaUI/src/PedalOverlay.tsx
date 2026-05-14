@@ -10,6 +10,7 @@ export const PEDAL_IDS: Record<string, number> = {
   'Budapest':      1,
   'New York':      2,
   'Bridge':        3,
+  'Looper':        4,
 };
 
 export interface KnobDef {
