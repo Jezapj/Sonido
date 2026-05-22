@@ -7,6 +7,10 @@ extern "C" {
     #include "pedal_eq.h"
     #include "pedal_chorus.h"
     #include "pedal_od.h"
+    #include "pedal_dist.h"
+    #include "pedal_phaser.h"
+    #include "pedal_reverb.h"
+
     
     /*
      * To add a new pedal:
@@ -22,7 +26,10 @@ extern "C" {
 // Must match PEDAL_IDS in PedalOverlay.tsx and pedal_id values in lib.rs.
 #define PEDAL_EQ_PREGAIN  0
 #define PEDAL_CHORUS   1
-#define PEDAL_OVERDRIVE   2   // uncomment when pedal_od.c is added
+#define PEDAL_PHASER   2
+#define PEDAL_OVERDRIVE   3
+#define PEDAL_DISTORTION   4
+#define PEDAL_REVERB   5
 // #define PEDAL_REVERB      3   // uncomment when pedal_reverb.c is added
 
 // ── Audio config ──────────────────────────────────────────────────────────────
@@ -235,8 +242,10 @@ void setup()
     // ── Register pedals ───────────────────────────────────────────────────────
     pedal_eq_init(PEDAL_EQ_PREGAIN, (float)SAMPLE_RATE);
     pedal_chorus_init(PEDAL_CHORUS, (float)SAMPLE_RATE);
-    pedal_od_init(PEDAL_OVERDRIVE, (float)SAMPLE_RATE);     // future
-    // pedal_reverb_init(PEDAL_REVERB, (float)SAMPLE_RATE);    // future
+    pedal_phaser_init(PEDAL_PHASER, (float)SAMPLE_RATE); 
+    pedal_od_init(PEDAL_OVERDRIVE, (float)SAMPLE_RATE);  
+    pedal_dist_init(PEDAL_DISTORTION, (float)SAMPLE_RATE);   
+    pedal_reverb_init(PEDAL_REVERB, (float)SAMPLE_RATE);    
 
     Serial.println("Pedal chain ready");
 }

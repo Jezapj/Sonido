@@ -8,9 +8,11 @@ import './PedalOverlay.css';
 export const PEDAL_IDS: Record<string, number> = {
   'Blurry Lights': 0,
   'Budapest':      1,
-  'New York':      2,
-  'Bridge':        3,
-  'Looper':        4,
+  'Good Boy':      2,
+  'New York':      3,
+  'Strawberries':  4,
+  'Bridge':        5,
+  'Looper':        6,
 };
 
 export interface KnobDef {
@@ -61,6 +63,24 @@ export const PEDAL_DEFS: Record<string, PedalDef> = {
       { key: 'tone',  label: 'Tone',  min: 0, max: 1, defaultValue: 0.5, decimals: 2 },
       { key: 'time',  label: 'Time',  min: 0, max: 1, defaultValue: 0.4, decimals: 2 },
       { key: 'level', label: 'Level', min: 0, max: 1, defaultValue: 0.6, decimals: 2 },
+    ],
+  },
+  'Strawberries': {
+    label: 'Distortion',
+    knobs: [
+      { key: 'gain',     label: 'Gain',     min: 0, max: 1, defaultValue: 0.5, decimals: 2 },
+      { key: 'tone',     label: 'Tone',     min: 0, max: 1, defaultValue: 0.5, decimals: 2 },
+      { key: 'presence', label: 'Presence', min: 0, max: 1, defaultValue: 0.3, decimals: 2 },
+      { key: 'level',    label: 'Level',    min: 0, max: 1, defaultValue: 0.5, decimals: 2 },
+    ],
+  },
+  'Good Boy': {
+    label: 'Phaser',
+    knobs: [
+      { key: 'rate',     label: 'Rate',     min: 0.1, max: 5.0, defaultValue: 0.5,  unit: 'Hz', decimals: 2 },
+      { key: 'depth',    label: 'Depth',    min: 0.0, max: 1.0, defaultValue: 0.8,              decimals: 2 },
+      { key: 'feedback', label: 'Feedback', min: 0.0, max: 0.9, defaultValue: 0.4,              decimals: 2 },
+      { key: 'mix',      label: 'Mix',      min: 0.0, max: 1.0, defaultValue: 0.5,              decimals: 2 },
     ],
   },
 };
