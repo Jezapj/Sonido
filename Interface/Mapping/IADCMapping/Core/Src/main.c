@@ -418,17 +418,59 @@ static void MX_GPIO_Init(void)
 
 /* Process first half of buffers (0 to 63) */
 void HAL_ADC_ConvHalfCpltCallback(ADC_HandleTypeDef* hadc) {
+    // 1. Process the audio samples
     for (int i = 0; i < 64; i++) {
-        // i is the ADC index, i*2 is the I2S base index (interleaved)
         convert_sample(i, i * 2);
+    }
+
+    // 2. Closed-Loop Clock Synchronization (SPLL)
+    // Get remaining half-words to transfer in the circular SAI DMA buffer
+    uint32_t remaining = __HAL_DMA_GET_COUNTER(&hdma_sai1_a);
+    // Convert to a sample index (0 to 127)
+    uint32_t sai_sample_idx = (I2S_BUF_SIZE - remaining) / 2;
+
+    // When ADC finishes the first half (0-63), the SAI reader should ideally 
+    // be dead-center in the second half (index 96) to maximize safety margin.
+    int32_t error = (int32_t)sai_sample_idx - 96;
+
+    // Handle circular wrap-around corrections
+    if (error > 64)  error -= 128;
+    if (error < -64) error += 128;
+
+    // Micro-adjust TIM6 auto-reload register based on drift direction
+    if (error > 0) {
+        TIM6->ARR = 1665; // SAI is running ahead; speed up the ADC
+    } else if (error < 0) {
+        TIM6->ARR = 1667; // SAI is lagging behind; slow down the ADC
+    } else {
+        TIM6->ARR = 1666; // Perfectly matched phase
     }
 }
 
 /* Process second half of buffers (64 to 127) */
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc) {
+    // 1. Process the audio samples
     for (int i = 64; i < 128; i++) {
-        // i is the ADC index, i*2 is the I2S base index
         convert_sample(i, i * 2);
+    }
+
+    // 2. Closed-Loop Clock Synchronization (SPLL)
+    uint32_t remaining = __HAL_DMA_GET_COUNTER(&hdma_sai1_a);
+    uint32_t sai_sample_idx = (I2S_BUF_SIZE - remaining) / 2;
+
+    // When ADC finishes the second half (64-127), the SAI reader should ideally 
+    // be dead-center in the first half (index 32).
+    int32_t error = (int32_t)sai_sample_idx - 32;
+
+    if (error > 64)  error -= 128;
+    if (error < -64) error += 128;
+
+    if (error > 0) {
+        TIM6->ARR = 1665; // SAI is running ahead; speed up the ADC
+    } else if (error < 0) {
+        TIM6->ARR = 1667; // SAI is lagging behind; slow down the ADC
+    } else {
+        TIM6->ARR = 1666; // Perfectly matched phase
     }
 }
 
