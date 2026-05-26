@@ -117,7 +117,10 @@ static void check_serial_params(void)
         }
 
         // ── Guard: abort on buffer overrun ────────────────────────────────
-        if (s_pkt_idx >= PKT_BUF_SIZE) { s_pkt_idx = 0; continue; }
+        if (s_pkt_idx >= PKT_BUF_SIZE) { 
+            s_pkt_idx = 0;
+            continue; 
+        }
 
         s_pkt[s_pkt_idx++] = b;
 
@@ -126,13 +129,11 @@ static void check_serial_params(void)
         // ══════════════════════════════════════════════════════════════════
         if (s_pkt_type == 0x55)
         {
-            // Once we have the 5-byte header we know the total length.
             if (s_pkt_idx == PKT_HEADER_SIZE) {
                 s_n_params = s_pkt[4];
                 if (s_n_params > PKT_MAX_PARAMS) { s_pkt_idx = 0; continue; }
             }
             if (s_pkt_idx < PKT_HEADER_SIZE) continue;
-
             int expected = PKT_HEADER_SIZE + s_n_params * 4 + 1;
             if (s_pkt_idx < expected) continue;
 
@@ -143,7 +144,10 @@ static void check_serial_params(void)
 
             uint8_t pedal_id = s_pkt[2];
             bool    enabled  = (s_pkt[3] != 0);
-            float  *params   = (float *)(s_pkt + PKT_HEADER_SIZE);
+            
+            // FIX: Copy bytes safely into a naturally aligned local float array
+            float params[PKT_MAX_PARAMS];
+            memcpy(params, s_pkt + PKT_HEADER_SIZE, s_n_params * sizeof(float));
 
             if (pedal_id == 0xFF) {
                 // ── Looper config (outside pedal registry) ────────────────
@@ -163,13 +167,11 @@ static void check_serial_params(void)
         // ══════════════════════════════════════════════════════════════════
         else if (s_pkt_type == 0x57)
         {
-            // Third byte is the sample count.
             if (s_pkt_idx == 3) {
                 s_n_audio = s_pkt[2];
                 if (s_n_audio > AUDIO_PKT_MAX_SAMPLES) { s_pkt_idx = 0; continue; }
             }
             if (s_pkt_idx < 3) continue;
-
             int expected = 3 + s_n_audio * 2 + 1;
             if (s_pkt_idx < expected) continue;
 
@@ -179,11 +181,13 @@ static void check_serial_params(void)
             if (csum != s_pkt[expected - 1]) { s_pkt_idx = 0; continue; }
 
             // Push samples into the playback ring buffer.
-            // Silently drop if the FIFO is full (host is faster than drain).
-            int16_t *samps = (int16_t *)(s_pkt + 3);
+            // FIX: Read unaligned bytes safely sample-by-sample via memcpy
             for (int i = 0; i < s_n_audio; i++) {
                 if (s_play_avail < LOOPER_PLAY_BUF) {
-                    s_play_buf[s_play_write] = samps[i];
+                    int16_t sample;
+                    memcpy(&sample, &s_pkt[3 + (i * 2)], sizeof(int16_t));
+                    
+                    s_play_buf[s_play_write] = sample;
                     s_play_write = (s_play_write + 1) % LOOPER_PLAY_BUF;
                     s_play_avail++;
                 }

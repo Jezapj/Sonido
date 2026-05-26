@@ -24,15 +24,13 @@ impl std::fmt::Display for LooperState {
     }
 }
 
-/// The full loop lives in the computer's heap.
-/// At 48 kHz int16, 60 s costs ~5.7 MB — trivial for a desktop machine.
 pub struct LoopBuffer {
     pub state:    LooperState,
-    pub samples:  Vec<i16>,  // complete loop recording
-    pub loop_len: usize,     // fixed once the first record pass ends
-    pub play_pos: usize,     // read head, wraps at loop_len
-    pub mix:      f32,       // output level sent to ESP32  [0.0, 1.0]
-    pub feedback: f32,       // overdub decay per pass      [0.5, 1.0]
+    pub samples:  Vec<i16>,
+    pub loop_len: usize,
+    pub play_pos: usize,
+    pub mix:      f32,
+    pub feedback: f32,
 }
 
 impl Default for LoopBuffer {
@@ -50,7 +48,6 @@ impl Default for LoopBuffer {
 
 pub struct LoopState(pub Mutex<LoopBuffer>);
 
-/// Serialisable snapshot emitted as the `looper_info` Tauri event.
 #[derive(Clone, serde::Serialize)]
 pub struct LooperInfo {
     pub state:         String,
@@ -61,15 +58,10 @@ pub struct LooperInfo {
     pub feedback:      f32,
 }
 
-// ── Shared serial write port ──────────────────────────────────────────────────
+// ── Shared state ──────────────────────────────────────────────────────────────
 
 pub struct SerialWritePort(pub Mutex<Option<Box<dyn serialport::SerialPort + Send>>>);
-
-// ── Last-known DSP params per pedal slot ─────────────────────────────────────
-
 pub struct LastParamsStore(pub Mutex<HashMap<u8, (bool, Vec<f32>)>>);
-
-// ── Hardware output mute state ────────────────────────────────────────────────
 
 pub struct MuteState {
     pub is_muted:      Mutex<bool>,
@@ -91,9 +83,12 @@ fn build_param_packet(pedal_id: u8, enabled: bool, params: &[f32]) -> Vec<u8> {
 }
 
 /// TYPE B — Loop audio:  [0xAA][0x57][n][int16…][XOR]
-/// Checksum covers bytes from index 2 to the byte before it — same scheme
-/// as the firmware parser.
+///
+/// FIX: the ESP32 rejects packets where n > AUDIO_PKT_MAX_SAMPLES (64).
+/// Callers must pass slices of ≤ 64 samples.  Use `build_audio_packets`
+/// (plural) to automatically chunk a larger buffer.
 fn build_audio_packet(samples: &[i16]) -> Vec<u8> {
+    debug_assert!(samples.len() <= 64, "audio packet too large: {}", samples.len());
     let n = samples.len() as u8;
     let mut pkt: Vec<u8> = vec![0xAA, 0x57, n];
     for &s in samples {
@@ -103,6 +98,21 @@ fn build_audio_packet(samples: &[i16]) -> Vec<u8> {
     let checksum: u8 = pkt[2..].iter().fold(0u8, |acc, &b| acc ^ b);
     pkt.push(checksum);
     pkt
+}
+
+/// Build one or more TYPE B packets from an arbitrarily-sized slice.
+/// Each packet carries at most 64 samples (AUDIO_PKT_MAX_SAMPLES on the ESP32).
+///
+/// Background: port.read() can return several I2S blocks at once (e.g. 256
+/// samples).  The old code passed the whole slice to build_audio_packet which
+/// cast len as u8 (wrapping for len > 255) and produced a single oversized
+/// packet that the ESP32 always rejected, leaving the looper ring buffer empty.
+fn build_audio_packets(samples: &[i16]) -> Vec<u8> {
+    let mut out = Vec::with_capacity((samples.len() / 64 + 1) * (3 + 64 * 2 + 1));
+    for chunk in samples.chunks(64) {
+        out.extend(build_audio_packet(chunk));
+    }
+    out
 }
 
 // ── Shared write helper ───────────────────────────────────────────────────────
@@ -118,7 +128,6 @@ fn write_packet(app: &tauri::AppHandle, pkt: &[u8]) -> Result<(), String> {
 
 // ── Loop buffer helpers ───────────────────────────────────────────────────────
 
-/// Read the next `len` samples from the loop and advance play_pos.
 fn take_playback_chunk(lb: &mut LoopBuffer, len: usize) -> Vec<i16> {
     if lb.loop_len == 0 {
         return vec![0i16; len];
@@ -131,9 +140,6 @@ fn take_playback_chunk(lb: &mut LoopBuffer, len: usize) -> Vec<i16> {
     out
 }
 
-/// Blend `live` into the loop at the current play position using `feedback`
-/// decay, then advance play_pos.  The blended result is both stored and
-/// returned for immediate playback so the overdub is heard in real time.
 fn overdub_and_advance(lb: &mut LoopBuffer, live: &[i16]) -> Vec<i16> {
     if lb.loop_len == 0 {
         return vec![0i16; live.len()];
@@ -159,7 +165,14 @@ fn snapshot(lb: &LoopBuffer) -> LooperInfo {
     } else {
         0.0
     };
-    LooperInfo { state: lb.state.to_string(), loop_len_secs, play_pos_secs, progress, mix: lb.mix, feedback: lb.feedback }
+    LooperInfo {
+        state: lb.state.to_string(),
+        loop_len_secs,
+        play_pos_secs,
+        progress,
+        mix:      lb.mix,
+        feedback: lb.feedback,
+    }
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -200,7 +213,7 @@ async fn looper_tap(app: tauri::AppHandle) -> Result<LooperInfo, String> {
     let pkt: Option<Vec<u8>>;
     let info;
     {
-        let state = app.state::<LoopState>(); 
+        let state = app.state::<LoopState>();
         let mut lb = state.0.lock().map_err(|e| e.to_string())?;
         match lb.state {
             LooperState::Idle | LooperState::Stopped => {
@@ -281,10 +294,10 @@ async fn set_looper_params(app: tauri::AppHandle, mix: f32, feedback: f32) -> Re
     {
         let state = app.state::<LoopState>();
         let mut lb = state.0.lock().map_err(|e| e.to_string())?;
-        lb.mix       = mix.clamp(0.0, 1.0);
-        lb.feedback  = feedback.clamp(0.5, 1.0);
-        active       = matches!(lb.state, LooperState::Playing | LooperState::Overdubbing);
-        info         = snapshot(&lb);
+        lb.mix      = mix.clamp(0.0, 1.0);
+        lb.feedback = feedback.clamp(0.5, 1.0);
+        active      = matches!(lb.state, LooperState::Playing | LooperState::Overdubbing);
+        info        = snapshot(&lb);
     }
     if active {
         write_packet(&app, &build_param_packet(0xFF, true, &[1.0f32, mix])).ok();
@@ -327,11 +340,17 @@ async fn stream_audio(app: tauri::AppHandle) {
 }
 
 /// Open a serial port and stream audio.
+///
 /// On every received chunk:
-///   - If Recording  → append i16 samples to the loop Vec
-///   - If Playing    → send the next loop slice back as a TYPE B packet
-///   - If Overdubbing→ blend live into the loop, send blended slice back
-///   - Always        → emit audio_chunk + throttled looper_info events
+///   - Recording   → append i16 samples to the loop Vec
+///   - Playing     → send the next loop slice back as TYPE B packet(s)
+///   - Overdubbing → blend live into loop, send blended slice back as TYPE B packet(s)
+///   - Always      → emit audio_chunk + throttled looper_info events
+///
+/// FIX: playback used to pass the entire chunk (potentially hundreds of samples)
+/// to build_audio_packet, which truncated `n` to u8 (wrapping for n > 255) and
+/// produced a packet the ESP32 always rejected (n > 64).  We now use
+/// build_audio_packets which splits into ≤64-sample packets automatically.
 #[tauri::command]
 async fn stream_audio_serial(app: tauri::AppHandle, port_name: String, baud_rate: u32) {
     {
@@ -356,12 +375,11 @@ async fn stream_audio_serial(app: tauri::AppHandle, port_name: String, baud_rate
         }
 
         let mut raw_buf:   Vec<u8> = vec![0; 2048];
-        let mut info_tick: u32     = 0;   // throttle looper_info to ~10 Hz
+        let mut info_tick: u32     = 0;
 
         loop {
             match port.read(raw_buf.as_mut_slice()) {
                 Ok(n) => {
-                    // ── Parse raw bytes into f32 (waveform) + i16 (looper) ──
                     let mut chunk_f32: Vec<f32> = Vec::with_capacity(n / 2);
                     let mut chunk_i16: Vec<i16> = Vec::with_capacity(n / 2);
                     for i in (0..n).step_by(2) {
@@ -374,11 +392,10 @@ async fn stream_audio_serial(app: tauri::AppHandle, port_name: String, baud_rate
                     if chunk_i16.is_empty() { continue; }
 
                     // ── Looper capture / playback ─────────────────────────────
-                    // We hold LoopBuffer lock only for buffer operations,
-                    // then drop it before write_packet (SerialWritePort lock)
-                    // to avoid lock-order deadlock.
+                    // Hold the LoopBuffer lock only for buffer operations, then
+                    // drop before write_packet to avoid lock-order deadlock.
                     let playback_pkt: Option<Vec<u8>> = {
-                        let state = app.state::<LoopState>(); // Fix 1
+                        let state = app.state::<LoopState>();
                         let mut lb = state.0.lock().unwrap();
                         match lb.state {
                             LooperState::Recording => {
@@ -386,12 +403,14 @@ async fn stream_audio_serial(app: tauri::AppHandle, port_name: String, baud_rate
                                 None
                             }
                             LooperState::Playing => {
+                                // build_audio_packets chunks to ≤64 samples each
+                                // so the ESP32 never rejects the packet.
                                 let slice = take_playback_chunk(&mut lb, chunk_i16.len());
-                                Some(build_audio_packet(&slice))
+                                Some(build_audio_packets(&slice))
                             }
                             LooperState::Overdubbing => {
                                 let slice = overdub_and_advance(&mut lb, &chunk_i16);
-                                Some(build_audio_packet(&slice))
+                                Some(build_audio_packets(&slice))
                             }
                             _ => None,
                         }
@@ -406,14 +425,13 @@ async fn stream_audio_serial(app: tauri::AppHandle, port_name: String, baud_rate
                     info_tick += chunk_i16.len() as u32;
                     if info_tick >= 4800 {
                         info_tick = 0;
-                        let state = app.state::<LoopState>(); // Fix 2
-                        let lb = state.0.lock().unwrap();
-                        let info = snapshot(&lb);
+                        let state = app.state::<LoopState>();
+                        let lb    = state.0.lock().unwrap();
+                        let info  = snapshot(&lb);
                         drop(lb);
                         let _ = app.emit("looper_info", info);
                     }
 
-                    // ── Waveform event for existing visualisers ───────────────
                     let _ = app.emit("audio_chunk", &chunk_f32);
                 }
 
