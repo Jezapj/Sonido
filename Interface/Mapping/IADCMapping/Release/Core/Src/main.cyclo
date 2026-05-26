@@ -2,6 +2,6 @@
 ../Core/Src/main.c:79:6:forcesilence	1
 ../Core/Src/main.c:189:6:SystemClock_Config	4
 ../Core/Src/main.c:107:5:main	6
-../Core/Src/main.c:420:6:HAL_ADC_ConvHalfCpltCallback	2
-../Core/Src/main.c:428:6:HAL_ADC_ConvCpltCallback	2
-../Core/Src/main.c:441:6:Error_Handler	1
+../Core/Src/main.c:420:6:HAL_ADC_ConvHalfCpltCallback	6
+../Core/Src/main.c:451:6:HAL_ADC_ConvCpltCallback	5
+../Core/Src/main.c:483:6:Error_Handler	1
