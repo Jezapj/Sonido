@@ -59,7 +59,7 @@ const CARD1_CONTENT = (
 );
 
 const CARD2_CONTENT = (
-  <div style={{ height: '100%', position: 'relative', top: '-75px', scale: '80%' }}>
+  <div style={{ height: '100%', position: 'relative', top: '-50px', scale: '80%' }}>
     <RustStreamExample />
   </div>
 );
