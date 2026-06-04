@@ -4,6 +4,11 @@ import { useSerialStream } from "./useSerialStream";
 const GUITAR_BUF = 1024;
 const FS = 47991;
 
+interface WaveformPeak {
+  mn: number;
+  mx: number;
+}
+
 // ── Pure helpers ──────────────────────────────────────────────────────────────
 
 function fmtTime(secs: number): string {
@@ -12,15 +17,32 @@ function fmtTime(secs: number): string {
   return `${m}:${s}`;
 }
 
-/** Paint the backing track waveform + playhead onto a canvas. Pure, called from RAF. */
-function paintBacking(canvas: HTMLCanvasElement, buf: AudioBuffer, progress: number) {
+/** Pre-calculates downsampled min/max peaks ONCE when the file is decoded */
+function getWaveformPeaks(buf: AudioBuffer, width: number): WaveformPeak[] {
+  const data = buf.getChannelData(0);
+  const step = Math.max(1, Math.floor(data.length / width));
+  const peaks: WaveformPeak[] = [];
+
+  for (let x = 0; x < width; x++) {
+    let mn = 0, mx = 0;
+    const off = x * step;
+    for (let j = 0; j < step && off + j < data.length; j++) {
+      const s = data[off + j];
+      if (s < mn) mn = s;
+      if (s > mx) mx = s;
+    }
+    peaks.push({ mn, mx });
+  }
+  return peaks;
+}
+
+/** Paint the backing track waveform + playhead onto a canvas using cached peaks. Lightning fast. */
+function paintBacking(canvas: HTMLCanvasElement, peaks: WaveformPeak[], progress: number) {
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
   const W = canvas.width, H = canvas.height;
   ctx.clearRect(0, 0, W, H);
 
-  const data = buf.getChannelData(0);
-  const step = Math.max(1, Math.floor(data.length / W));
   const mid  = H / 2;
   const playedX = progress * W;
 
@@ -30,14 +52,8 @@ function paintBacking(canvas: HTMLCanvasElement, buf: AudioBuffer, progress: num
   ctx.beginPath(); ctx.moveTo(0, mid); ctx.lineTo(W, mid); ctx.stroke();
 
   // Waveform bars — played region brighter
-  for (let x = 0; x < W; x++) {
-    let mn = 0, mx = 0;
-    const off = x * step;
-    for (let j = 0; j < step && off + j < data.length; j++) {
-      const s = data[off + j];
-      if (s < mn) mn = s;
-      if (s > mx) mx = s;
-    }
+  for (let x = 0; x < peaks.length; x++) {
+    const { mn, mx } = peaks[x];
     ctx.strokeStyle = x < playedX
       ? "rgba(99,102,241,0.9)"
       : "rgba(99,102,241,0.25)";
@@ -106,6 +122,8 @@ export default function RustStreamExample() {
   // ── Backing track ──────────────────────────────────────────────────────────
   const bCanvasRef = useRef<HTMLCanvasElement>(null);
   const bABufRef   = useRef<AudioBuffer | null>(null);
+  const bPeaksRef  = useRef<WaveformPeak[]>([]);      // Cached waveform visuals
+  const lastSecRef = useRef<number>(-1);              // Used to throttle state re-renders
   const bSrcRef    = useRef<AudioBufferSourceNode | null>(null);
   const bStartRef  = useRef(0);      // actx.currentTime when src.start() was called
   const bOffRef    = useRef(0);      // resume offset in seconds
@@ -262,8 +280,10 @@ export default function RustStreamExample() {
       }
       cancelAnimationFrame(bAnimRef.current);
 
-      bABufRef.current = ab;
-      bOffRef.current  = 0;
+      bABufRef.current  = ab;
+      bPeaksRef.current = getWaveformPeaks(ab, 680); // Generated once on load
+      bOffRef.current   = 0;
+      lastSecRef.current = -1;
       setBName(file.name);
       setBDur(ab.duration);
       setBProg(0);
@@ -271,7 +291,9 @@ export default function RustStreamExample() {
 
       // Paint initial static waveform after the canvas has rendered
       setTimeout(() => {
-        if (bCanvasRef.current) paintBacking(bCanvasRef.current, ab, 0);
+        if (bCanvasRef.current && bPeaksRef.current.length > 0) {
+          paintBacking(bCanvasRef.current, bPeaksRef.current, 0);
+        }
       }, 60);
     } catch {
       alert("Could not decode audio. Accepted formats: WAV, MP3, OGG, FLAC, AAC.");
@@ -291,9 +313,10 @@ export default function RustStreamExample() {
     setBPlay(false);
     if (reset) {
       bOffRef.current = 0;
+      lastSecRef.current = -1;
       setBProg(0);
-      if (bCanvasRef.current && bABufRef.current)
-        paintBacking(bCanvasRef.current, bABufRef.current, 0);
+      if (bCanvasRef.current && bPeaksRef.current.length > 0)
+        paintBacking(bCanvasRef.current, bPeaksRef.current, 0);
     }
   }, []);
 
@@ -325,13 +348,14 @@ export default function RustStreamExample() {
       bSrcRef.current = null;
       cancelAnimationFrame(bAnimRef.current);
       bOffRef.current = 0;
+      lastSecRef.current = -1;
       setBPlay(false);
       setBProg(0);
-      if (bCanvasRef.current && bABufRef.current)
-        paintBacking(bCanvasRef.current, bABufRef.current, 0);
+      if (bCanvasRef.current && bPeaksRef.current.length > 0)
+        paintBacking(bCanvasRef.current, bPeaksRef.current, 0);
     };
 
-    // Progress animation loop
+    // Performance Optimized Progress animation loop
     const tick = () => {
       const ab2  = bABufRef.current;
       const ctx2 = actxRef.current;
@@ -341,8 +365,19 @@ export default function RustStreamExample() {
       if (bLoopRef.current && ab2.duration > 0) pos = pos % ab2.duration;
       else pos = Math.min(pos, ab2.duration);
       const prog = ab2.duration > 0 ? pos / ab2.duration : 0;
-      setBProg(prog);
-      if (bCanvasRef.current) paintBacking(bCanvasRef.current, ab2, prog);
+      
+      // 1. Instantly draw frame using precalculated peaks (60 FPS, completely independent of React context)
+      if (bCanvasRef.current && bPeaksRef.current.length > 0) {
+        paintBacking(bCanvasRef.current, bPeaksRef.current, prog);
+      }
+      
+      // 2. Throttle state updates to occur only when the string clock second increments
+      const currentSec = Math.floor(pos);
+      if (currentSec !== lastSecRef.current) {
+        lastSecRef.current = currentSec;
+        setBProg(prog);
+      }
+      
       bAnimRef.current = requestAnimationFrame(tick);
     };
     bAnimRef.current = requestAnimationFrame(tick);
@@ -368,8 +403,10 @@ export default function RustStreamExample() {
     if (wasPlaying) bStop(false);
     const newOff = Math.max(0, Math.min(prog * ab.duration, ab.duration));
     bOffRef.current = newOff;
+    lastSecRef.current = Math.floor(newOff);
     setBProg(prog);
-    if (bCanvasRef.current) paintBacking(bCanvasRef.current, ab, prog);
+    if (bCanvasRef.current && bPeaksRef.current.length > 0) 
+      paintBacking(bCanvasRef.current, bPeaksRef.current, prog);
     if (wasPlaying) bStart(newOff);
   }, [bStop, bStart]);
 
@@ -568,7 +605,7 @@ export default function RustStreamExample() {
               style={{
                 border: "0.5px solid rgba(99,102,241,0.28)",
                 borderRadius: 8, overflow: "hidden",
-                marginBottom: 7, cursor: "pointer",
+                marginBottom: 3, cursor: "pointer",
                 position: "relative",
               }}
               onClick={e => {
@@ -577,8 +614,8 @@ export default function RustStreamExample() {
               }}
               title="Click to seek"
             >
-              <canvas ref={bCanvasRef} width={680} height={68}
-                style={{ display: "block", width: "100%", height: 68 }} />
+              <canvas ref={bCanvasRef} width={680} height={45}
+                style={{ display: "block", width: "100%", height: 45 }} />
             </div>
 
             {/* Playback controls row */}
@@ -622,7 +659,7 @@ export default function RustStreamExample() {
               {/* Mix crossfader */}
             <div style={{
               background: "rgba(255,255,255,0.03)", width: "100%",
-              borderRadius: 8, padding: "0px 10px",
+              borderRadius: 8, padding: "0px 10px", margin: "2px 10px -5px 10px",
             }}>
               <div style={{
                 display: "flex", alignItems: "center",
@@ -657,7 +694,7 @@ export default function RustStreamExample() {
               />
               <div style={{
                 fontSize: 9.5, color: "rgba(255,255,255,0.17)",
-                textAlign: "center", marginTop: 1, letterSpacing: "0.03em",
+                textAlign: "center", margin: "0px 0px -1px 0px", letterSpacing: "0.03em",
               }}>
                 {monOn
                   ? "Mixing both streams through monitor speakers"
@@ -683,15 +720,13 @@ export default function RustStreamExample() {
         ) : (
           <div style={{
             fontSize: 11, color: "rgba(255,255,255,0.16)",
-            textAlign: "center", padding: "10px 0",
+            textAlign: "center", padding: "2px 0",
             letterSpacing: "0.03em",
           }}>
             Load an audio file to use as a backing track
           </div>
         )}
       </div>
-
-      
 
       {/* Hidden file input */}
       <input
@@ -711,7 +746,7 @@ export default function RustStreamExample() {
         .rse-mix-slider {
           -webkit-appearance: none;
           appearance: none;
-          height: 4px;
+          height: 0px;
           border-radius: 999px;
           outline: none;
           cursor: pointer;
@@ -720,7 +755,7 @@ export default function RustStreamExample() {
         .rse-mix-slider::-webkit-slider-thumb {
           -webkit-appearance: none;
           width: 14px;
-          height: 14px;
+          height: 0px;
           border-radius: 50%;
           background: #a5b4fc;
           box-shadow: 0 0 7px rgba(99,102,241,0.65);
@@ -733,7 +768,7 @@ export default function RustStreamExample() {
         }
         .rse-mix-slider::-moz-range-thumb {
           width: 14px;
-          height: 14px;
+          height: 0px;
           border-radius: 50%;
           background: #a5b4fc;
           border: 1.5px solid rgba(255,255,255,0.25);

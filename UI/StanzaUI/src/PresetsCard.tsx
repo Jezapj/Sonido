@@ -244,7 +244,7 @@ const PresetsCard: React.FC<PresetsCardProps> = ({ pedalStates, onLoad, onPreset
       boxSizing:  'border-box',
       fontFamily: "'Courier New', monospace",
       gap:        0,
-      top: '-130px'
+      top: '-230px'
     }}>
 
       {/* ── Bank header ── */}

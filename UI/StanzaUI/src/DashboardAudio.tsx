@@ -143,18 +143,15 @@ export default function DashboardAudio() {
 
   /**
    * Schedule a Float32 chunk into the Web Audio API graph.
-   * Uses tight lookahead scheduling so chunks play gaplessly; resyncs if
-   * the buffer drifts more than 200 ms ahead (e.g. after a tab sleep).
+   * Optimized for lowest latency monitoring with minimized padding/drift gates.
    */
   const scheduleAudioChunk = useCallback((samples: number[]) => {
     if (!isMonitoringRef.current) return;
 
-    // Lazily create the AudioContext on the first chunk after the user
-    // has toggled monitoring on (satisfies browser autoplay policy because
-    // the toggle button click counts as a user gesture).
+    // Force context creation using 'interactive' latency hint path
     if (!audioCtxRef.current || audioCtxRef.current.state === "closed") {
       try {
-        audioCtxRef.current  = new AudioContext({ sampleRate: SAMPLE_RATE });
+        audioCtxRef.current  = new AudioContext({ sampleRate: SAMPLE_RATE, latencyHint: "interactive" });
         nextStartTimeRef.current = 0;
       } catch {
         return; // Browser blocked — silently skip
@@ -173,12 +170,17 @@ export default function DashboardAudio() {
     src.connect(ctx.destination);
 
     const now = ctx.currentTime;
-    // If our schedule head has drifted too far forward (e.g. tab was hidden),
-    // snap it back to now + a small startup buffer (50 ms).
-    if (nextStartTimeRef.current > now + 0.2) {
-      nextStartTimeRef.current = now + 0.05;
+    
+    // Tight scheduling thresholds for real-time live playback
+    const LOOKAHEAD = 0.005; // 5ms lookahead baseline
+    const MAX_DRIFT = 0.030; // 30ms maximum allowed delay building up before flushing
+
+    // If the scheduled head falls behind real clock or drifts out past 30ms, hard reset to baseline
+    if (nextStartTimeRef.current < now || nextStartTimeRef.current > now + MAX_DRIFT) {
+      nextStartTimeRef.current = now + LOOKAHEAD;
     }
-    const startAt = Math.max(nextStartTimeRef.current, now + 0.02);
+    
+    const startAt = nextStartTimeRef.current;
     src.start(startAt);
     nextStartTimeRef.current = startAt + buf.duration;
   }, []);
@@ -186,7 +188,6 @@ export default function DashboardAudio() {
   /**
    * Toggle the hardware DAC output mute by sending a zero / restored pre_gain
    * packet to the ESP32 EQ pedal via the `set_output_mute` Tauri command.
-   * The Rust side tracks the original pre_gain so unmuting restores it exactly.
    */
   const toggleHardwareMute = useCallback(async () => {
     const next = !isMuted;
@@ -282,7 +283,6 @@ export default function DashboardAudio() {
     runningRef.current = false;
     cancelAnimationFrame(animRef.current);
     bufferRef.current.fill(0);
-    // Stop monitoring and restore hardware mute state on disconnect
     setIsMonitoring(false);
     if (isMuted) {
       invoke<void>("set_output_mute", { muted: false }).catch(() => {});
@@ -335,7 +335,6 @@ export default function DashboardAudio() {
 
           {/* ── Monitor & Mute controls ──────────────────────────────────── */}
           <div style={{ display: "flex", gap: 6, marginTop: 10, marginBottom: "-10px" }}>
-            {/* Frontend monitor toggle — plays audio through computer speakers */}
             <button
               onClick={() => setIsMonitoring(v => !v)}
               title={isMonitoring
@@ -353,7 +352,6 @@ export default function DashboardAudio() {
               {isMonitoring ? "👂 Monitor: ON" : "👂 Monitor: OFF"}
             </button>
 
-            {/* Hardware DAC mute — zeros pre_gain on the ESP32 EQ pedal */}
             <button
               onClick={toggleHardwareMute}
               disabled={muteLoading}

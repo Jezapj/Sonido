@@ -447,10 +447,10 @@ interface CircularGalleryProps {
 
 export default function CircularGallery({
   items, bend = 3, textColor = '#ffffff',
-  borderRadius = 0.05, font = 'bold 30px Figtree',
+  borderRadius = 0.05, font = 'bold 700px Figtree',
   scrollSpeed = 2, scrollEase = 0.05,
   pedalStates: externalPedalStates,
-  onPedalStatesChange, theme = 'dark',
+  onPedalStatesChange, 
 }: CircularGalleryProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const appRef       = useRef<App | null>(null);

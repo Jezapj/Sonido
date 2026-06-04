@@ -139,9 +139,9 @@ type DockIconProps = {
   isHovered?: MotionValue<number>;
 };
 
-function DockIcon({ children, className = '' }: DockIconProps) {
-  return <div className={`dock-icon ${className}`}>{children}</div>;
-}
+// function DockIcon({ children, className = '' }: DockIconProps) {
+//   return <div className={`dock-icon ${className}`}>{children}</div>;
+// }
 
 export default function Dock({
   items,

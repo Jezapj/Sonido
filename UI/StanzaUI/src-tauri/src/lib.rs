@@ -362,7 +362,7 @@ async fn stream_audio_serial(app: tauri::AppHandle, port_name: String, baud_rate
 
     tauri::async_runtime::spawn(async move {
         let mut port = match serialport::new(port_name.clone(), baud_rate)
-            .timeout(std::time::Duration::from_millis(10))
+            .timeout(std::time::Duration::from_millis(2))
             .open()
         {
             Ok(p)  => p,
@@ -438,7 +438,7 @@ async fn stream_audio_serial(app: tauri::AppHandle, port_name: String, baud_rate
                 Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => {}
                 Err(e) => { eprintln!("Serial read error: {}", e); break; }
             }
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
         }
 
         *app.state::<SerialWritePort>().0.lock().unwrap() = None;
