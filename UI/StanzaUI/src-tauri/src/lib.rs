@@ -68,7 +68,7 @@ pub struct MuteState {
     pub saved_pregain: Mutex<f32>,
 }
 
-// ── Packet builders ───────────────────────────────────────────────────────────
+// ── Packet builder ────────────────────────────────────────────────────────────
 
 /// TYPE A — DSP params:  [0xAA][0x55][id][enabled][n][floats…][XOR]
 fn build_param_packet(pedal_id: u8, enabled: bool, params: &[f32]) -> Vec<u8> {
@@ -80,39 +80,6 @@ fn build_param_packet(pedal_id: u8, enabled: bool, params: &[f32]) -> Vec<u8> {
     let checksum: u8 = pkt[2..].iter().fold(0u8, |acc, &b| acc ^ b);
     pkt.push(checksum);
     pkt
-}
-
-/// TYPE B — Loop audio:  [0xAA][0x57][n][int16…][XOR]
-///
-/// FIX: the ESP32 rejects packets where n > AUDIO_PKT_MAX_SAMPLES (64).
-/// Callers must pass slices of ≤ 64 samples.  Use `build_audio_packets`
-/// (plural) to automatically chunk a larger buffer.
-fn build_audio_packet(samples: &[i16]) -> Vec<u8> {
-    debug_assert!(samples.len() <= 64, "audio packet too large: {}", samples.len());
-    let n = samples.len() as u8;
-    let mut pkt: Vec<u8> = vec![0xAA, 0x57, n];
-    for &s in samples {
-        pkt.push((s & 0xFF) as u8);
-        pkt.push(((s >> 8) & 0xFF) as u8);
-    }
-    let checksum: u8 = pkt[2..].iter().fold(0u8, |acc, &b| acc ^ b);
-    pkt.push(checksum);
-    pkt
-}
-
-/// Build one or more TYPE B packets from an arbitrarily-sized slice.
-/// Each packet carries at most 64 samples (AUDIO_PKT_MAX_SAMPLES on the ESP32).
-///
-/// Background: port.read() can return several I2S blocks at once (e.g. 256
-/// samples).  The old code passed the whole slice to build_audio_packet which
-/// cast len as u8 (wrapping for len > 255) and produced a single oversized
-/// packet that the ESP32 always rejected, leaving the looper ring buffer empty.
-fn build_audio_packets(samples: &[i16]) -> Vec<u8> {
-    let mut out = Vec::with_capacity((samples.len() / 64 + 1) * (3 + 64 * 2 + 1));
-    for chunk in samples.chunks(64) {
-        out.extend(build_audio_packet(chunk));
-    }
-    out
 }
 
 // ── Shared write helper ───────────────────────────────────────────────────────
@@ -128,6 +95,7 @@ fn write_packet(app: &tauri::AppHandle, pkt: &[u8]) -> Result<(), String> {
 
 // ── Loop buffer helpers ───────────────────────────────────────────────────────
 
+/// Advance play_pos by `len` frames, returning those samples as i16.
 fn take_playback_chunk(lb: &mut LoopBuffer, len: usize) -> Vec<i16> {
     if lb.loop_len == 0 {
         return vec![0i16; len];
@@ -140,21 +108,29 @@ fn take_playback_chunk(lb: &mut LoopBuffer, len: usize) -> Vec<i16> {
     out
 }
 
-fn overdub_and_advance(lb: &mut LoopBuffer, live: &[i16]) -> Vec<i16> {
+/// Read the next `len` loop samples as normalised f32 WITHOUT advancing play_pos.
+/// Used during overdub so the monitor hears a clean live+loop blend with no
+/// double-counting of the live signal.
+fn peek_loop_chunk(lb: &LoopBuffer, len: usize) -> Vec<f32> {
     if lb.loop_len == 0 {
-        return vec![0i16; live.len()];
+        return vec![0.0f32; len];
+    }
+    (0..len)
+        .map(|i| lb.samples[(lb.play_pos + i) % lb.loop_len] as f32 / 32767.0)
+        .collect()
+}
+
+/// Blend `live` into the loop buffer (feedback decay) and advance play_pos.
+fn overdub_and_advance(lb: &mut LoopBuffer, live: &[i16]) {
+    if lb.loop_len == 0 {
+        return;
     }
     let len = live.len().min(lb.loop_len);
-    let mut out = Vec::with_capacity(len);
     for i in 0..len {
-        let blended = lb.samples[lb.play_pos] as f32 * lb.feedback
-                      + live[i] as f32;
-        let clamped = blended.clamp(-32768.0, 32767.0) as i16;
-        lb.samples[lb.play_pos] = clamped;
-        out.push(clamped);
+        let blended = lb.samples[lb.play_pos] as f32 * lb.feedback + live[i] as f32;
+        lb.samples[lb.play_pos] = blended.clamp(-32768.0, 32767.0) as i16;
         lb.play_pos = (lb.play_pos + 1) % lb.loop_len;
     }
-    out
 }
 
 fn snapshot(lb: &LoopBuffer) -> LooperInfo {
@@ -204,13 +180,12 @@ fn list_serial_ports() -> Vec<String> {
 // ═════════════════════════════════════════════════════════════════════════════
 
 /// Context-sensitive tap:
-///   Idle / Stopped → Recording   (clears previous loop, starts capture)
-///   Recording      → Playing     (fixes loop length, begins playback)
+///   Idle / Stopped → Recording
+///   Recording      → Playing
 ///   Playing        → Overdubbing
 ///   Overdubbing    → Playing
 #[tauri::command]
 async fn looper_tap(app: tauri::AppHandle) -> Result<LooperInfo, String> {
-    let pkt: Option<Vec<u8>>;
     let info;
     {
         let state = app.state::<LoopState>();
@@ -221,31 +196,26 @@ async fn looper_tap(app: tauri::AppHandle) -> Result<LooperInfo, String> {
                 lb.loop_len = 0;
                 lb.play_pos = 0;
                 lb.state    = LooperState::Recording;
-                pkt = Some(build_param_packet(0xFF, false, &[0.0f32, lb.mix]));
             }
             LooperState::Recording => {
                 lb.loop_len = lb.samples.len();
                 lb.play_pos = 0;
                 lb.state    = LooperState::Playing;
-                pkt = Some(build_param_packet(0xFF, true, &[1.0f32, lb.mix]));
             }
             LooperState::Playing => {
                 lb.state = LooperState::Overdubbing;
-                pkt = None;
             }
             LooperState::Overdubbing => {
                 lb.state = LooperState::Playing;
-                pkt = None;
             }
         }
         info = snapshot(&lb);
     }
-    if let Some(p) = pkt { write_packet(&app, &p).ok(); }
     let _ = app.emit("looper_info", info.clone());
     Ok(info)
 }
 
-/// Stop playback; keeps the loop in memory so it can be restarted.
+/// Stop playback; keeps the loop in memory.
 #[tauri::command]
 async fn looper_stop(app: tauri::AppHandle) -> Result<LooperInfo, String> {
     let info;
@@ -265,7 +235,6 @@ async fn looper_stop(app: tauri::AppHandle) -> Result<LooperInfo, String> {
         }
         info = snapshot(&lb);
     }
-    write_packet(&app, &build_param_packet(0xFF, false, &[0.0f32, 0.0f32])).ok();
     let _ = app.emit("looper_info", info.clone());
     Ok(info)
 }
@@ -281,26 +250,20 @@ async fn looper_clear(app: tauri::AppHandle) -> Result<LooperInfo, String> {
         *lb = LoopBuffer { mix, feedback, ..LoopBuffer::default() };
         info = snapshot(&lb);
     }
-    write_packet(&app, &build_param_packet(0xFF, false, &[0.0f32, 0.0f32])).ok();
     let _ = app.emit("looper_info", info.clone());
     Ok(info)
 }
 
-/// Update mix and feedback; pushes new mix to ESP32 if currently active.
+/// Update mix and feedback levels.
 #[tauri::command]
 async fn set_looper_params(app: tauri::AppHandle, mix: f32, feedback: f32) -> Result<LooperInfo, String> {
     let info;
-    let active;
     {
         let state = app.state::<LoopState>();
         let mut lb = state.0.lock().map_err(|e| e.to_string())?;
         lb.mix      = mix.clamp(0.0, 1.0);
         lb.feedback = feedback.clamp(0.5, 1.0);
-        active      = matches!(lb.state, LooperState::Playing | LooperState::Overdubbing);
         info        = snapshot(&lb);
-    }
-    if active {
-        write_packet(&app, &build_param_packet(0xFF, true, &[1.0f32, mix])).ok();
     }
     Ok(info)
 }
@@ -341,16 +304,15 @@ async fn stream_audio(app: tauri::AppHandle) {
 
 /// Open a serial port and stream audio.
 ///
-/// On every received chunk:
-///   - Recording   → append i16 samples to the loop Vec
-///   - Playing     → send the next loop slice back as TYPE B packet(s)
-///   - Overdubbing → blend live into loop, send blended slice back as TYPE B packet(s)
-///   - Always      → emit audio_chunk + throttled looper_info events
+/// Architecture: the ESP32 sends processed audio to the host one-way.
+/// The looper is handled entirely on the host:
+///   - Recording   → append i16 samples to LoopBuffer
+///   - Playing     → mix loop samples into chunk_f32 before emitting
+///   - Overdubbing → peek loop (for monitoring), overdub into loop, mix peek into chunk_f32
 ///
-/// FIX: playback used to pass the entire chunk (potentially hundreds of samples)
-/// to build_audio_packet, which truncated `n` to u8 (wrapping for n > 255) and
-/// produced a packet the ESP32 always rejected (n > 64).  We now use
-/// build_audio_packets which splits into ≤64-sample packets automatically.
+/// No audio is ever sent back to the ESP32. This eliminates the serial
+/// bandwidth contention that previously garbled the audio stream.
+/// The loop is heard through the computer Monitor (enable in the Status card).
 #[tauri::command]
 async fn stream_audio_serial(app: tauri::AppHandle, port_name: String, baud_rate: u32) {
     {
@@ -391,37 +353,46 @@ async fn stream_audio_serial(app: tauri::AppHandle, port_name: String, baud_rate
                     }
                     if chunk_i16.is_empty() { continue; }
 
-                    // ── Looper capture / playback ─────────────────────────────
-                    // Hold the LoopBuffer lock only for buffer operations, then
-                    // drop before write_packet to avoid lock-order deadlock.
-                    let playback_pkt: Option<Vec<u8>> = {
+                    // ── Looper: capture or mix into the live stream ───────────────────
+                    //
+                    // Loop audio is blended directly into chunk_f32 here on the host.
+                    // No data travels back to the ESP32, so serial bandwidth is never
+                    // contested — the garbled-audio bug is eliminated.
+                    {
                         let state = app.state::<LoopState>();
                         let mut lb = state.0.lock().unwrap();
                         match lb.state {
                             LooperState::Recording => {
+                                // Capture the live DSP-processed signal into the loop.
                                 lb.samples.extend_from_slice(&chunk_i16);
-                                None
                             }
                             LooperState::Playing => {
-                                // build_audio_packets chunks to ≤64 samples each
-                                // so the ESP32 never rejects the packet.
+                                // Mix loop samples into the monitor stream.
                                 let slice = take_playback_chunk(&mut lb, chunk_i16.len());
-                                Some(build_audio_packets(&slice))
+                                let mix = lb.mix;
+                                for (dst, &s) in chunk_f32.iter_mut().zip(slice.iter()) {
+                                    *dst = (*dst + s as f32 / 32767.0 * mix).clamp(-1.0, 1.0);
+                                }
                             }
                             LooperState::Overdubbing => {
-                                let slice = overdub_and_advance(&mut lb, &chunk_i16);
-                                Some(build_audio_packets(&slice))
+                                // Peek at the current loop frame BEFORE overdubbing so
+                                // the monitor hears live + loop with no double-counted
+                                // live signal (avoids live×(1+mix) artefact).
+                                let loop_preview = peek_loop_chunk(&lb, chunk_f32.len());
+                                let mix = lb.mix;
+                                // Blend live into the loop (advances play_pos).
+                                overdub_and_advance(&mut lb, &chunk_i16);
+                                // Mix pre-overdub loop frame into monitor stream.
+                                for (dst, &ls) in chunk_f32.iter_mut().zip(loop_preview.iter()) {
+                                    *dst = (*dst + ls * mix).clamp(-1.0, 1.0);
+                                }
                             }
-                            _ => None,
+                            _ => {}
                         }
                         // lock drops here
-                    };
-
-                    if let Some(pkt) = playback_pkt {
-                        write_packet(&app, &pkt).ok();
                     }
 
-                    // ── Throttled looper_info event (~10 Hz) ──────────────────
+                    // ── Throttled looper_info event (~10 Hz) ──────────────────────────
                     info_tick += chunk_i16.len() as u32;
                     if info_tick >= 4800 {
                         info_tick = 0;
