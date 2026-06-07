@@ -1,16 +1,12 @@
-import React, { useRef, useState, useCallback } from 'react';
+import React, { useRef, useState, useCallback, useEffect } from 'react';
 import type { PedalState } from './PedalOverlay';
 import { useIsLightMode } from './UseTheme';
-
-// ── Public interface (unchanged — no parent edits needed) ─────────────────────
 
 export interface PresetsCardProps {
   pedalStates:    Record<string, PedalState>;
   onLoad:         (states: Record<string, PedalState>) => void;
   onPresetSaved?: () => void;
 }
-
-// ── Internal types ────────────────────────────────────────────────────────────
 
 interface PresetEntry {
   id:     string;
@@ -24,8 +20,6 @@ interface PresetFile {
   appName: string;
   pedals:  Record<string, PedalState>;
 }
-
-// ── Persistence ───────────────────────────────────────────────────────────────
 
 const BANK_KEY      = 'stanza-preset-bank';
 const MAX_BANK_SIZE = 12;
@@ -41,9 +35,6 @@ function writeBank(entries: PresetEntry[]): void {
   try { localStorage.setItem(BANK_KEY, JSON.stringify(entries)); } catch {}
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-/** Auto-name based on current wall-clock time, e.g. "23 May 14:07" */
 function autoName(): string {
   const d = new Date();
   const day  = d.getDate();
@@ -53,11 +44,6 @@ function autoName(): string {
   return `${day} ${mon} ${hh}:${mm}`;
 }
 
-/**
- * Turn a raw filename like "stanza-preset-2026-05-23T14-07-00.json"
- * into something readable like "23/05 14:07".
- * Falls back to the bare stem for custom names.
- */
 function cleanFilename(raw: string): string {
   const stem = raw.replace(/\.json$/i, '');
   const m = stem.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})/);
@@ -65,19 +51,23 @@ function cleanFilename(raw: string): string {
   return stem.replace(/^stanza-preset-/, '') || stem;
 }
 
-// ── Component ─────────────────────────────────────────────────────────────────
-
 const PresetsCard: React.FC<PresetsCardProps> = ({ pedalStates, onLoad, onPresetSaved }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const light        = useIsLightMode();
 
-  const [bank,      setBank]      = useState<PresetEntry[]>(readBank);
-  const [activeId,  setActiveId]  = useState<string | null>(null);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editDraft, setEditDraft] = useState('');
-  const [status,    setStatus]    = useState<{ msg: string; ok: boolean } | null>(null);
+  const [bank,         setBank]         = useState<PresetEntry[]>(readBank);
+  const [activeId,     setActiveId]     = useState<string | null>(null);
+  const [editingId,    setEditingId]    = useState<string | null>(null);
+  const [editDraft,    setEditDraft]    = useState('');
+  const [status,       setStatus]       = useState<{ msg: string; ok: boolean } | null>(null);
+  const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
 
-  // ── Flash helpers ─────────────────────────────────────────────────────────
+  // Clamp focusedIndex when bank shrinks
+  useEffect(() => {
+    if (focusedIndex !== null && focusedIndex >= bank.length) {
+      setFocusedIndex(bank.length > 0 ? bank.length - 1 : null);
+    }
+  }, [bank.length]);
 
   const flash = useCallback((msg: string, ok: boolean) => {
     setStatus({ msg, ok });
@@ -85,35 +75,67 @@ const PresetsCard: React.FC<PresetsCardProps> = ({ pedalStates, onLoad, onPreset
     return () => clearTimeout(t);
   }, []);
 
-  // ── Bank mutation helpers ─────────────────────────────────────────────────
-
   const commitBank = useCallback((next: PresetEntry[], newActive?: string | null) => {
     setBank(next);
     writeBank(next);
     if (newActive !== undefined) setActiveId(newActive);
   }, []);
 
-  // ── Actions ───────────────────────────────────────────────────────────────
-
-  /** Apply a bank entry: switch pedals + mark as active. */
   const handleApply = useCallback((entry: PresetEntry) => {
-    if (editingId) return;            // don't trigger while renaming
+    if (editingId) return;
     setActiveId(entry.id);
     onLoad(entry.pedals);
     flash(`→ "${entry.name}"`, true);
   }, [editingId, onLoad, flash]);
 
-  /** Remove a single entry from the bank. */
+  // ── Keyboard navigation ───────────────────────────────────────────────────
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't intercept while typing in any input
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (editingId) return;
+      if (bank.length === 0) return;
+
+      switch (e.key) {
+        case 'w':
+        case 'W':
+        case 'ArrowUp':
+          e.preventDefault();
+          setFocusedIndex(prev =>
+            prev === null ? bank.length - 1 : (prev - 1 + bank.length) % bank.length
+          );
+          break;
+
+        case 's':
+        case 'S':
+        case 'ArrowDown':
+          e.preventDefault();
+          setFocusedIndex(prev =>
+            prev === null ? 0 : (prev + 1) % bank.length
+          );
+          break;
+
+        case 'Enter':
+        case ' ':
+          e.preventDefault();
+          if (focusedIndex !== null && bank[focusedIndex]) {
+            handleApply(bank[focusedIndex]);
+          }
+          break;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [bank, focusedIndex, editingId, handleApply]);
+
   const handleRemove = useCallback((id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     const next = bank.filter(b => b.id !== id);
     commitBank(next, activeId === id ? null : activeId);
   }, [bank, activeId, commitBank]);
 
-  /**
-   * Snapshot the current live pedal state into the bank without writing a
-   * file — useful for mid-session bookmarks.
-   */
   const handleSnapshot = useCallback(() => {
     if (Object.keys(pedalStates).length === 0) {
       flash('No pedals configured yet', false);
@@ -126,10 +148,10 @@ const PresetsCard: React.FC<PresetsCardProps> = ({ pedalStates, onLoad, onPreset
     };
     const next = [...bank, entry].slice(-MAX_BANK_SIZE);
     commitBank(next, entry.id);
+    setFocusedIndex(next.length - 1);
     flash(`Saved "${entry.name}" to bank`, true);
   }, [pedalStates, bank, commitBank, flash]);
 
-  /** Save current state as a .json file AND add it to the bank. */
   const handleSave = useCallback(() => {
     if (Object.keys(pedalStates).length === 0) {
       flash('No pedals configured yet', false);
@@ -155,13 +177,14 @@ const PresetsCard: React.FC<PresetsCardProps> = ({ pedalStates, onLoad, onPreset
       URL.revokeObjectURL(url);
 
       const entry: PresetEntry = { id: String(Date.now()), name, pedals: { ...pedalStates } };
-      commitBank([...bank, entry].slice(-MAX_BANK_SIZE), entry.id);
+      const next = [...bank, entry].slice(-MAX_BANK_SIZE);
+      commitBank(next, entry.id);
+      setFocusedIndex(next.length - 1);
       flash(`Saved "${name}" ✓`, true);
       onPresetSaved?.();
     } catch { flash('Save failed', false); }
   }, [pedalStates, bank, commitBank, flash, onPresetSaved]);
 
-  /** Load a .json file, add it to the bank, and apply it immediately. */
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -173,7 +196,9 @@ const PresetsCard: React.FC<PresetsCardProps> = ({ pedalStates, onLoad, onPreset
         const states: Record<string, PedalState> = raw.pedals ?? raw;
         if (typeof states !== 'object' || states === null) throw new Error();
         const entry: PresetEntry = { id: String(Date.now()), name, pedals: states };
-        commitBank([...bank, entry].slice(-MAX_BANK_SIZE), entry.id);
+        const next = [...bank, entry].slice(-MAX_BANK_SIZE);
+        commitBank(next, entry.id);
+        setFocusedIndex(next.length - 1);
         onLoad(states);
         flash(`Loaded "${name}" ✓`, true);
       } catch { flash('Invalid preset file', false); }
@@ -182,8 +207,6 @@ const PresetsCard: React.FC<PresetsCardProps> = ({ pedalStates, onLoad, onPreset
     reader.readAsText(file);
     e.target.value = '';
   }, [bank, commitBank, onLoad, flash]);
-
-  // ── Inline rename ─────────────────────────────────────────────────────────
 
   const startRename = useCallback((entry: PresetEntry, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -199,61 +222,57 @@ const PresetsCard: React.FC<PresetsCardProps> = ({ pedalStates, onLoad, onPreset
   }, [editingId, editDraft, bank, commitBank]);
 
   // ── Colour tokens ─────────────────────────────────────────────────────────
-
   const c = {
     header:         light ? 'rgba(0,0,0,0.30)'          : 'rgba(255,255,255,0.20)',
     empty:          light ? 'rgba(0,0,0,0.28)'          : 'rgba(255,255,255,0.18)',
     divider:        light ? 'rgba(0,0,0,0.07)'          : 'rgba(255,255,255,0.06)',
-    // entry base
     entryBg:        light ? 'rgba(132,0,255,0.05)'      : 'rgba(255,255,255,0.04)',
     entryBgHov:     light ? 'rgba(132,0,255,0.11)'      : 'rgba(255,255,255,0.08)',
     entryBgAct:     light ? 'rgba(132,0,255,0.15)'      : 'rgba(132,0,255,0.20)',
+    entryBgFocus:   light ? 'rgba(132,0,255,0.09)'      : 'rgba(255,255,255,0.07)',
     entryBorder:    light ? 'rgba(132,0,255,0.10)'      : 'rgba(255,255,255,0.06)',
     entryBorderAct: light ? 'rgba(132,0,255,0.42)'      : 'rgba(132,0,255,0.52)',
+    entryBorderFocus:light? 'rgba(132,0,255,0.28)'      : 'rgba(255,255,255,0.28)',
     entryText:      light ? 'rgba(26,15,46,0.68)'       : 'rgba(255,255,255,0.65)',
     entryTextAct:   light ? 'rgba(90,0,200,0.95)'       : 'rgba(200,160,255,1.00)',
     dot:            '#22c55e',
     dotOff:         light ? 'rgba(0,0,0,0.12)'          : 'rgba(255,255,255,0.10)',
     remove:         light ? 'rgba(0,0,0,0.20)'          : 'rgba(255,255,255,0.18)',
     removeHov:      light ? 'rgba(200,0,0,0.65)'        : 'rgba(255,80,80,0.75)',
-    // + button
     addBg:          light ? 'rgba(132,0,255,0.08)'      : 'rgba(132,0,255,0.13)',
     addBorder:      light ? 'rgba(132,0,255,0.28)'      : 'rgba(132,0,255,0.38)',
     addText:        light ? 'rgba(90,0,200,0.85)'       : 'rgba(180,140,255,0.90)',
-    // action buttons
     saveBg:         light ? 'rgba(132,0,255,0.10)'      : 'rgba(132,0,255,0.18)',
     saveBorder:     light ? 'rgba(132,0,255,0.38)'      : 'rgba(132,0,255,0.45)',
     saveText:       light ? 'rgba(90,0,200,0.90)'       : 'rgba(200,160,255,0.95)',
     loadBg:         light ? 'rgba(0,0,0,0.05)'          : 'rgba(255,255,255,0.05)',
     loadBorder:     light ? 'rgba(0,0,0,0.13)'          : 'rgba(255,255,255,0.11)',
     loadText:       light ? 'rgba(26,15,46,0.55)'       : 'rgba(255,255,255,0.52)',
-    // status
+    hint:           light ? 'rgba(0,0,0,0.20)'          : 'rgba(255,255,255,0.16)',
     ok:             light ? '#166534'                   : '#22c55e',
     err:            light ? '#dc2626'                   : '#ef4444',
   };
 
-  // ── Render ────────────────────────────────────────────────────────────────
-
   return (
     <div style={{
-      position:   'absolute',
-      inset:      0,
-      display:    'flex',
+      position:      'absolute',
+      inset:         0,
+      display:       'flex',
       flexDirection: 'column',
-      padding:    '10px 12px 12px',
-      boxSizing:  'border-box',
-      fontFamily: "'Courier New', monospace",
-      gap:        0,
-      top: '-230px'
+      padding:       '10px 12px 12px',
+      boxSizing:     'border-box',
+      fontFamily:    "'Courier New', monospace",
+      gap:           0,
+      top:           '-230px',
     }}>
 
       {/* ── Bank header ── */}
       <div style={{
-        display:         'flex',
-        alignItems:      'center',
-        justifyContent:  'space-between',
-        marginBottom:    6,
-        flexShrink:      0,
+        display:        'flex',
+        alignItems:     'center',
+        justifyContent: 'space-between',
+        marginBottom:   6,
+        flexShrink:     0,
       }}>
         <span style={{
           fontSize:      10,
@@ -270,22 +289,21 @@ const PresetsCard: React.FC<PresetsCardProps> = ({ pedalStates, onLoad, onPreset
           )}
         </span>
 
-        {/* Snapshot button — adds current state without downloading */}
         <button
           onClick={handleSnapshot}
-          title="Snapshot current pedal state into bank (no file download)"
+          title="Snapshot current pedal state into bank"
           style={{
-            background:    c.addBg,
-            border:       `1px solid ${c.addBorder}`,
-            color:         c.addText,
-            borderRadius:  6,
-            padding:       '1px 9px 2px',
-            fontSize:      15,
-            fontWeight:    600,
-            cursor:        'pointer',
-            lineHeight:    1.3,
-            transition:    'background 0.15s',
-            fontFamily:    'inherit',
+            background:   c.addBg,
+            border:      `1px solid ${c.addBorder}`,
+            color:        c.addText,
+            borderRadius: 6,
+            padding:      '1px 9px 2px',
+            fontSize:     15,
+            fontWeight:   600,
+            cursor:       'pointer',
+            lineHeight:   1.3,
+            transition:   'background 0.15s',
+            fontFamily:   'inherit',
           }}
           onMouseEnter={e => (e.currentTarget.style.background = light ? 'rgba(132,0,255,0.18)' : 'rgba(132,0,255,0.25)')}
           onMouseLeave={e => (e.currentTarget.style.background = c.addBg)}
@@ -294,16 +312,15 @@ const PresetsCard: React.FC<PresetsCardProps> = ({ pedalStates, onLoad, onPreset
 
       {/* ── Bank list ── */}
       <div style={{
-        flex:            1,
-        minHeight:       0,
-        overflowY:       'auto',
-        display:         'flex',
-        flexDirection:   'column',
-        gap:             3,
-        marginBottom:    7,
-        // thin scrollbar
-        scrollbarWidth:  'thin',
-        scrollbarColor:  `rgba(132,0,255,0.25) transparent`,
+        flex:           1,
+        minHeight:      0,
+        overflowY:      'auto',
+        display:        'flex',
+        flexDirection:  'column',
+        gap:            3,
+        marginBottom:   4,
+        scrollbarWidth: 'thin',
+        scrollbarColor: `rgba(132,0,255,0.25) transparent`,
       } as React.CSSProperties}>
 
         {bank.length === 0 ? (
@@ -319,52 +336,62 @@ const PresetsCard: React.FC<PresetsCardProps> = ({ pedalStates, onLoad, onPreset
             <strong style={{ fontWeight: 700 }}>↑ Load</strong> a file.
           </p>
         ) : (
-          bank.map(entry => {
+          bank.map((entry, index) => {
             const isActive  = entry.id === activeId;
             const isEditing = entry.id === editingId;
+            const isFocused = index === focusedIndex;
+
+            const borderColor = isActive
+              ? c.entryBorderAct
+              : isFocused
+              ? c.entryBorderFocus
+              : c.entryBorder;
+
+            const bgColor = isActive
+              ? c.entryBgAct
+              : isFocused
+              ? c.entryBgFocus
+              : c.entryBg;
 
             return (
               <div
                 key={entry.id}
-                onClick={() => handleApply(entry)}
+                onClick={() => { setFocusedIndex(index); handleApply(entry); }}
+                onMouseEnter={() => setFocusedIndex(index)}
                 role="button"
                 tabIndex={0}
                 onKeyDown={e => { if (e.key === 'Enter') handleApply(entry); }}
                 style={{
-                  display:       'flex',
-                  alignItems:    'center',
-                  gap:           7,
-                  padding:       '5px 6px 5px 8px',
-                  borderRadius:  8,
-                  border:       `1px solid ${isActive ? c.entryBorderAct : c.entryBorder}`,
-                  background:    isActive ? c.entryBgAct : c.entryBg,
-                  cursor:        isEditing ? 'default' : 'pointer',
-                  transition:    'background 0.13s, border-color 0.13s',
-                  flexShrink:    0,
-                  userSelect:    'none',
-                }}
-                onMouseEnter={e => {
-                  if (!isActive && !isEditing)
-                    (e.currentTarget as HTMLDivElement).style.background = c.entryBgHov;
-                }}
-                onMouseLeave={e => {
-                  if (!isActive && !isEditing)
-                    (e.currentTarget as HTMLDivElement).style.background = c.entryBg;
+                  display:    'flex',
+                  alignItems: 'center',
+                  gap:        7,
+                  padding:    '5px 6px 5px 8px',
+                  borderRadius: 8,
+                  border:    `1px solid ${borderColor}`,
+                  background: bgColor,
+                  cursor:     isEditing ? 'default' : 'pointer',
+                  transition: 'background 0.13s, border-color 0.13s',
+                  flexShrink: 0,
+                  userSelect: 'none',
+                  // Subtle left accent bar for keyboard-focused item
+                  boxShadow:  isFocused && !isActive
+                    ? `inset 2px 0 0 ${light ? 'rgba(132,0,255,0.45)' : 'rgba(180,140,255,0.55)'}`
+                    : 'none',
                 }}
               >
                 {/* Active dot */}
                 <span style={{
-                  width:      6,
-                  height:     6,
-                  borderRadius: '50%',
-                  flexShrink: 0,
-                  background: isActive ? c.dot : 'transparent',
-                  border:    `1.5px solid ${isActive ? c.dot : c.dotOff}`,
-                  boxShadow:  isActive ? `0 0 5px ${c.dot}88` : 'none',
-                  transition: 'background 0.2s, box-shadow 0.2s',
+                  width:       6,
+                  height:      6,
+                  borderRadius:'50%',
+                  flexShrink:  0,
+                  background:  isActive ? c.dot : 'transparent',
+                  border:     `1.5px solid ${isActive ? c.dot : c.dotOff}`,
+                  boxShadow:   isActive ? `0 0 5px ${c.dot}88` : 'none',
+                  transition:  'background 0.2s, box-shadow 0.2s',
                 }} />
 
-                {/* Name — double-click to rename */}
+                {/* Name */}
                 {isEditing ? (
                   <input
                     autoFocus
@@ -409,21 +436,33 @@ const PresetsCard: React.FC<PresetsCardProps> = ({ pedalStates, onLoad, onPreset
                   </span>
                 )}
 
+                {/* Index hint when keyboard-focused */}
+                {isFocused && !isActive && !isEditing && (
+                  <span style={{
+                    fontSize:      9,
+                    color:         light ? 'rgba(132,0,255,0.5)' : 'rgba(180,140,255,0.45)',
+                    letterSpacing: '0.04em',
+                    flexShrink:    0,
+                  }}>
+                    ↵
+                  </span>
+                )}
+
                 {/* Remove button */}
                 <button
                   onClick={e => handleRemove(entry.id, e)}
                   title="Remove from bank"
                   style={{
-                    background:  'none',
-                    border:      'none',
-                    cursor:      'pointer',
-                    color:       c.remove,
-                    fontSize:    10,
-                    padding:     '0 2px',
-                    lineHeight:  1,
-                    flexShrink:  0,
-                    transition:  'color 0.13s',
-                    fontFamily:  'inherit',
+                    background: 'none',
+                    border:     'none',
+                    cursor:     'pointer',
+                    color:      c.remove,
+                    fontSize:   10,
+                    padding:    '0 2px',
+                    lineHeight: 1,
+                    flexShrink: 0,
+                    transition: 'color 0.13s',
+                    fontFamily: 'inherit',
                   }}
                   onMouseEnter={e => (e.currentTarget.style.color = c.removeHov)}
                   onMouseLeave={e => (e.currentTarget.style.color = c.remove)}
@@ -433,6 +472,20 @@ const PresetsCard: React.FC<PresetsCardProps> = ({ pedalStates, onLoad, onPreset
           })
         )}
       </div>
+
+      {/* ── Keyboard hint ── */}
+      {bank.length > 0 && (
+        <div style={{
+          fontSize:      9,
+          color:         c.hint,
+          letterSpacing: '0.04em',
+          textAlign:     'center',
+          marginBottom:  4,
+          flexShrink:    0,
+        }}>
+          W / S  ·  ↑↓ navigate  ·  Enter / Space  apply
+        </div>
+      )}
 
       {/* ── Divider ── */}
       <div style={{ height: 1, background: c.divider, flexShrink: 0, marginBottom: 6 }} />
@@ -456,7 +509,6 @@ const PresetsCard: React.FC<PresetsCardProps> = ({ pedalStates, onLoad, onPreset
 
       {/* ── Action buttons ── */}
       <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-        {/* Save to file + add to bank */}
         <button
           onClick={handleSave}
           style={{
@@ -477,7 +529,6 @@ const PresetsCard: React.FC<PresetsCardProps> = ({ pedalStates, onLoad, onPreset
           onMouseLeave={e => (e.currentTarget.style.background = c.saveBg)}
         >↓ Save</button>
 
-        {/* Load from file + add to bank */}
         <button
           onClick={() => fileInputRef.current?.click()}
           style={{
