@@ -1,6 +1,7 @@
 import { useRef, useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import "./App.css";
+import "./CompactLayout.css";
 
 import FloatingLines from './FloatingLines';
 import { VscHome, VscArchive, VscAccount, VscSettingsGear } from "react-icons/vsc";
@@ -34,6 +35,28 @@ function loadInt(key: string, fallback = 0): number {
   return parseInt(localStorage.getItem(key) ?? String(fallback), 10) || fallback;
 }
 
+// ── Compact layout hook — activates at 800×480 and similar small screens ──────
+// Detects via window dimensions and syncs a data-compact attribute to the root
+// element so CSS can apply targeted overrides without any prop drilling.
+
+function useCompactLayout(): boolean {
+  const [isCompact, setIsCompact] = useState(
+    () => typeof window !== 'undefined' && window.innerWidth <= 820 && window.innerHeight <= 520
+  );
+
+  useEffect(() => {
+    const check = () => setIsCompact(window.innerWidth <= 820 && window.innerHeight <= 520);
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.dataset.compact = isCompact ? 'true' : 'false';
+  }, [isCompact]);
+
+  return isCompact;
+}
+
 // ── App ───────────────────────────────────────────────────────────────────────
 
 function App() {
@@ -44,6 +67,9 @@ function App() {
   const [bgVariant, setBgVariant] = useState(0);
   const [username,  setUsername]  = useState("");
   const [theme,     setTheme]     = useState<Theme>('dark');
+
+  // ── Compact layout detection ──────────────────────────────────────────────
+  const isCompact = useCompactLayout();
 
   // ── Settings — lifted so every component that needs them can read them ──────
   const [settings, setSettings] = useState<AppSettings>(loadSettings);
@@ -79,7 +105,6 @@ function App() {
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
 
-  // Handle theme change — also store in settings for persistence
   const handleThemeChange = useCallback((t: Theme) => {
     setTheme(t);
   }, []);
@@ -98,7 +123,6 @@ function App() {
   async function enter() {
     greetMsgRef.current = await invoke("greet", { name: nameRef.current });
     setUsername(nameRef.current.toUpperCase());
-    // Increment persistent session counter
     setSessionCount(prev => {
       const next = prev + 1;
       localStorage.setItem(LS_SESSIONS, String(next));
@@ -120,7 +144,6 @@ function App() {
   const shapeGridSpeed = settings.gridSpeed / 10;
 
   // ── Shared floating-lines background ─────────────────────────────────────
-  // Re-evaluated each render so settings.parallax is always current.
   const floatingLinesBg = (
     <FloatingLines
       enabledWaves={["top", "middle", "bottom"]}
@@ -157,7 +180,6 @@ function App() {
           opacity: bgVariant === 1 ? 1 : 0.3,
           transition: 'opacity 0.6s ease-in-out', pointerEvents: 'none',
         }}>
-          {/* ShapeGrid speed is driven by the Settings slider */}
           <ShapeGrid
             speed={shapeGridSpeed}
             squareSize={40}
@@ -208,9 +230,12 @@ function App() {
       {view === "main" && (
         <>
           <button onClick={handleToggle} style={{ position: 'fixed', top: 20, right: 20, zIndex: 1 }}>^</button>
-          <main className="container" style={{ padding: "5vh 0.5vw 0vh 0.5vw" }}>
+          {/*
+            Compact mode (800×480): zero top/bottom padding so the card grid can fill
+            the viewport. Normal mode keeps the original 5vh top offset.
+          */}
+          <main className="container" style={{ padding: isCompact ? "0 0.5vw" : "5vh 0.5vw 0vh 0.5vw" }}>
             <div>
-              {/* Pass settings flags and lifted pedal state into MagicBento */}
               <MagicBento
                 textAutoHide={true}
                 enableStars={settings.particles}
@@ -229,30 +254,39 @@ function App() {
                 onPresetSaved={handlePresetSaved}
               />
 
-              <div style={{ scale: "90%", top: '16vh', right: '80px', position: 'absolute', zIndex: -1 }}>
-                <ModelViewer
-                  url="https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/main/2.0/ToyCar/glTF-Binary/ToyCar.glb"
-                  width={"15vw"} height={"15vh"}
-                  modelXOffset={0} modelYOffset={0}
-                  enableMouseParallax enableHoverRotation
-                  environmentPreset="forest"
-                  fadeIn={true} autoRotate={true} autoRotateSpeed={0.35}
-                  showScreenshotButton={false}
+              {/* 3D model viewer — hidden on compact (800×480) screens */}
+              {!isCompact && (
+                <div style={{ scale: "90%", top: '16vh', right: '80px', position: 'absolute', zIndex: -1 }}>
+                  <ModelViewer
+                    url="https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/main/2.0/ToyCar/glTF-Binary/ToyCar.glb"
+                    width={"15vw"} height={"15vh"}
+                    modelXOffset={0} modelYOffset={0}
+                    enableMouseParallax enableHoverRotation
+                    environmentPreset="forest"
+                    fadeIn={true} autoRotate={true} autoRotateSpeed={0.35}
+                    showScreenshotButton={false}
+                  />
+                </div>
+              )}
+
+              {/* Logo — hidden on compact (would be off-screen due to negative top offset) */}
+              {!isCompact && (
+                <img
+                  className="logoMain"
+                  style={{ scale: "25%", top: '-18vh', right: '17%', position: 'absolute', zIndex: 1 }}
+                  src={theme === 'dark' ? "/STANZA_B_TP.png" : "/STANZA_W_TP.png"}
                 />
-              </div>
+              )}
 
-              <img
-                className="logoMain"
-                style={{ scale: "25%", top: '-18vh', right: '17%', position: 'absolute', zIndex: 1 }}
-                src={theme === 'dark' ? "/STANZA_B_TP.png" : "/STANZA_W_TP.png"}
-              />
-
-              <CircularText
-                text={greetMsgRef.current}
-                onHover="speedUp"
-                spinDuration={20}
-                className={theme === "dark" ? "custom-class" : "custom-class-light"}
-              />
+              {/* Ring text — hidden on compact screens */}
+              {!isCompact && (
+                <CircularText
+                  text={greetMsgRef.current}
+                  onHover="speedUp"
+                  spinDuration={20}
+                  className={theme === "dark" ? "custom-class" : "custom-class-light"}
+                />
+              )}
             </div>
           </main>
         </>

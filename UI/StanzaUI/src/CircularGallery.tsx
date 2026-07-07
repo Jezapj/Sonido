@@ -30,11 +30,16 @@ const LOOPER_ITEMS = new Set(['Looper']);
 const DEFAULT_ITEMS: GalleryItem[] = [
   { image: '/L_EQPreGain_pedal.png',      text: 'Blurry Lights'},
   { image: '/L_OD_pedal.png',             text: 'New York'     },
+  { image: '/L_Reverb(Spring)_pedal.png', text: 'Bridge'       },
+  { image: '/L_Octave_pedal.png',      text: 'Saturn'},
   { image: '/Chorus_pedal.png',         text: 'Budapest'       },
   { image: '/Looper_pedal.png',         text: 'Looper'       },
-  { image: '/L_Reverb(Spring)_pedal.png', text: 'Bridge'       },
+  { image: '/L_EQPreGain_pedal.png',      text: 'Tabular'},
   { image: 'L_Phaser_pedal.png',          text: 'Good Boy'     },
-  { image: 'L_Distortion_pedal.png',      text: 'Strawberries' }
+  { image: 'L_Distortion_pedal.png',      text: 'Strawberries' },
+  { image: '/L_Fuzz_pedal.png',      text: 'Grain'},
+  
+  
   
 ];
 

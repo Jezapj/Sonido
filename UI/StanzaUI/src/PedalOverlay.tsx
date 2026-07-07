@@ -6,13 +6,16 @@ import { useIsLightMode } from './UseTheme';
 import './PedalOverlay.css';
 
 export const PEDAL_IDS: Record<string, number> = {
-  'Blurry Lights': 0,
-  'Budapest':      1,
-  'Good Boy':      2,
-  'New York':      3,
-  'Strawberries':  4,
-  'Bridge':        5,
-  'Looper':        6,
+  'Saturn':        0,
+  'Blurry Lights': 1,
+  'Grain':         2,
+  'Tabular':       3,
+  'Budapest':      4,
+  'Good Boy':      5,
+  'New York':      6,
+  'Strawberries':  7,
+  'Bridge':        8,
+  'Looper':        9,
 };
 
 export interface KnobDef {
@@ -57,6 +60,15 @@ export const PEDAL_DEFS: Record<string, PedalDef> = {
       { key: 'feedback', label: 'Feedback', min: 0, max: 1, defaultValue: 0.0, decimals: 2 }
     ],
   },
+  'Grain': {
+    label: 'Fuzz',
+    knobs: [
+      { key: 'fuzz', label: 'Fuzz', min: 0, max: 1, defaultValue: 0.5, decimals: 2 },
+      { key: 'bias', label: 'Bias', min: 0, max: 1, defaultValue: 0.5, decimals: 2 },
+      { key: 'tone',  label: 'Tone',  min: 0, max: 1, defaultValue: 0.5, decimals: 2 },
+      { key: 'level', label: 'Level', min: 0, max: 1, defaultValue: 0.3, decimals: 2 },
+    ],
+  },
   'Bridge': {
     label: 'Spring Reverb',
     knobs: [
@@ -74,6 +86,22 @@ export const PEDAL_DEFS: Record<string, PedalDef> = {
       { key: 'level',    label: 'Level',    min: 0, max: 1, defaultValue: 0.5, decimals: 2 },
     ],
   },
+  'Tabular': {
+    label: 'EQ + Pre-Gain 2',
+    knobs: [
+      { key: 'pre_gain',          label: 'Pre-Gain',  min: 0,    max: 4,     defaultValue: 1.0,  unit: '×',  decimals: 2 },
+      { key: 'eq_low_gain_db',    label: 'Low Gain',  min: -12,  max: 12,    defaultValue: 0,    unit: 'dB', decimals: 1 },
+      { key: 'eq_mid_gain_db',    label: 'Mid Gain',  min: -12,  max: 12,    defaultValue: 0,    unit: 'dB', decimals: 1 },
+      { key: 'eq_high_gain_db',   label: 'High Gain', min: -12,  max: 12,    defaultValue: 0,    unit: 'dB', decimals: 1 },
+      { key: 'eq_low_freq',       label: 'Low Freq',  min: 20,   max: 500,   defaultValue: 80,   unit: 'Hz', decimals: 0 },
+      { key: 'eq_mid_freq',       label: 'Mid Freq',  min: 200,  max: 5000,  defaultValue: 800,  unit: 'Hz', decimals: 0 },
+      { key: 'eq_high_freq',      label: 'High Freq', min: 1000, max: 20000, defaultValue: 6000, unit: 'Hz', decimals: 0 },
+      { key: 'eq_low_q',          label: 'Low Q',     min: 0.1,  max: 4,     defaultValue: 1.0,  decimals: 2 },
+      { key: 'eq_mid_q',          label: 'Mid Q',     min: 0.1,  max: 4,     defaultValue: 1.0,  decimals: 2 },
+      { key: 'eq_high_q',         label: 'High Q',    min: 0.1,  max: 4,     defaultValue: 1.0,  decimals: 2 },
+      { key: 'limiter_threshold', label: 'Limiter',   min: 0.1,  max: 2,     defaultValue: 0.95, decimals: 2 },
+    ],
+  },
   'Good Boy': {
     label: 'Phaser',
     knobs: [
@@ -81,6 +109,36 @@ export const PEDAL_DEFS: Record<string, PedalDef> = {
       { key: 'depth',    label: 'Depth',    min: 0.0, max: 1.0, defaultValue: 0.8,              decimals: 2 },
       { key: 'feedback', label: 'Feedback', min: 0.0, max: 0.9, defaultValue: 0.4,              decimals: 2 },
       { key: 'mix',      label: 'Mix',      min: 0.0, max: 1.0, defaultValue: 0.5,              decimals: 2 },
+    ],
+  },
+  'Saturn': {
+    label: 'Octave',
+    knobs: [
+      /*
+       * shift: octave transposition.
+       *   −2 = two octaves down  (sub-bass, massive)
+       *   −1 = one octave down   (classic bass doubler / fuzz-octave sound)
+       *    0 = bypass (no pitch change; OLA grain path is skipped entirely)
+       *   +1 = one octave up     (bright, bell-like)
+       *   +2 = two octaves up    (high whistle register)
+       *
+       * Non-integer values give semitone-precise intervals, e.g.:
+       *   −0.5 ≈ tritone down,  +0.5 ≈ tritone up
+       */
+      { key: 'shift', label: 'Shift', min: -2,  max: 2,  defaultValue: -1,  unit: 'oct', decimals: 1 },
+      /*
+       * mix: dry/wet blend.
+       *   0   = dry only  (pedal off perceptually)
+       *   0.5 = classic parallel-octave blend — original note + octave below
+       *   1   = full wet  (only the pitch-shifted signal)
+       */
+      { key: 'mix',   label: 'Mix',   min: 0,   max: 1,  defaultValue: 0.5,              decimals: 2 },
+      /*
+       * level: post-shift output gain.
+       * Useful for compensating the loudness change that comes from large
+       * downward shifts (which reduce apparent loudness) or from heavy mixing.
+       */
+      { key: 'level', label: 'Level', min: 0,   max: 1,  defaultValue: 0.8,              decimals: 2 },
     ],
   },
 };

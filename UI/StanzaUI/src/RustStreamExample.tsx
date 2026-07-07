@@ -553,10 +553,13 @@ export default function RustStreamExample() {
       {/* ══════════════════════════════════════════════════════════════════════ */}
       {/* ── BACKING TRACK SECTION ──────────────────────────────────────────── */}
       {/* ══════════════════════════════════════════════════════════════════════ */}
-      <div style={{
-        borderTop: "0.5px solid rgba(255,255,255,0.07)",
-        paddingTop: 2, marginBottom: 4,
-      }}>
+      <div
+        className="rse-backing-section"
+        style={{
+          borderTop: "0.5px solid rgba(255,255,255,0.07)",
+          paddingTop: 2, marginBottom: 4,
+        }}
+      >
 
         {/* Header: label + filename + add button */}
         <div style={{

@@ -1,0 +1,154 @@
+/*
+ * CompactLayout.css
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Activated automatically when useCompactLayout() (App.tsx) detects a
+ * viewport ≤ 820 × 520 px (e.g. an 800 × 480 external monitor).
+ *
+ * Mechanism: the hook writes  data-compact="true"  on <html>, which scopes
+ * every selector below so NOTHING here affects the normal desktop view.
+ *
+ * Changes vs. normal layout
+ *   • 4-card bento becomes a 2 × 2 grid filling the viewport minus the dock
+ *   • Card heights are grid-controlled (auto), not fixed 40vh
+ *   • ModelViewer, CircularText and the logo are hidden via JSX in App.tsx
+ *   • FFT canvas capped at 72px so all Dashboard controls remain visible
+ *   • RustStreamExample wrapper reset to top:0 / scale:1 (backing track hidden
+ *     via .rse-backing-section class added to that div in RustStreamExample.tsx)
+ *   • CircularGallery fills its card exactly (no 190% / −20px / 120% offsets)
+ *   • PresetsCard top:−230px offset reset to 0 so the bank list is visible
+ *   • Pedal / Looper overlay top:−33vh reset so the panel stays on-screen
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
+
+/* ═══════════════════════════════════════════════════════════════════════
+   GRID — 2 × 2, fills viewport minus dock (76 px = 68 panel + 8 margin)
+   ═══════════════════════════════════════════════════════════════════════ */
+
+[data-compact="true"] .card-grid {
+  grid-template-columns: 1fr 1fr !important;
+  grid-template-rows: 1fr 1fr;
+  gap: 4px !important;
+  padding: 4px !important;
+  box-sizing: border-box;
+  height: calc(100dvh - 76px);
+  max-width: none !important;
+  /* reset the clamp so em-based sizes are predictable */
+  font-size: 1rem !important;
+}
+
+/* Cards: use grid-row height instead of the fixed 40vh */
+[data-compact="true"] .magic-bento-card {
+  height: auto !important;
+  border-radius: 14px !important;
+}
+
+/* Explicit 2 × 2 cell assignment — cancels any column-span rules */
+[data-compact="true"] .magic-bento-card:nth-child(1) { grid-column: 1 !important; grid-row: 1 !important; }
+[data-compact="true"] .magic-bento-card:nth-child(2) { grid-column: 2 !important; grid-row: 1 !important; }
+[data-compact="true"] .magic-bento-card:nth-child(3) { grid-column: 1 !important; grid-row: 2 !important; }
+[data-compact="true"] .magic-bento-card:nth-child(4) { grid-column: 2 !important; grid-row: 2 !important; }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   CARD 1 — Status / DashboardAudio
+   The 120 px FFT canvas is too tall for a ~196 px card when combined with
+   the note display, buttons and status row. 72 px keeps everything visible.
+   ═══════════════════════════════════════════════════════════════════════ */
+[data-compact="true"] .magic-bento-card:nth-child(1) canvas {
+  height: 72px !important;
+  max-height: 72px !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   CARD 2 — Waveform / RustStreamExample
+   CARD2_CONTENT positions its wrapper with top:−40px and scale:80%.
+   Reset both so content sits flush at the top of the smaller card.
+   ═══════════════════════════════════════════════════════════════════════ */
+[data-compact="true"] .magic-bento-card:nth-child(2) .magic-bento-card__content > div > div {
+  top: 0 !important;
+  scale: 1 !important;
+}
+
+/* Hide backing-track section (add className="rse-backing-section" to its
+   wrapper div in RustStreamExample.tsx — see patch instructions below) */
+[data-compact="true"] .rse-backing-section {
+  display: none !important;
+}
+
+/* Compact the stats row slightly */
+[data-compact="true"] .magic-bento-card:nth-child(2) .magic-bento-card__content > div > div > div:last-of-type {
+  margin-bottom: 0 !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   CARD 3 — Effects / CircularGallery
+   The content wrapper normally has height:190%, top:−20px, scale:120%
+   to overflow its card intentionally on large screens. On 196 px cards
+   that pushes the gallery mostly off-screen. Fill the card exactly.
+   ═══════════════════════════════════════════════════════════════════════ */
+[data-compact="true"] .magic-bento-card:nth-child(3) .magic-bento-card__content > div > div {
+  height: 100% !important;
+  top: 0 !important;
+  scale: 1 !important;
+}
+
+/* Status dots: keep visible above the WebGL canvas */
+[data-compact="true"] .cg-dot-layer {
+  z-index: 11;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   CARD 4 — Presets / PresetsCard
+   PresetsCard uses position:absolute + top:−230px to hide the bank list
+   at the top in tall cards, revealing only the action buttons. At ~196 px
+   that hides everything. Reset to 0 so the whole bank UI is visible.
+   ═══════════════════════════════════════════════════════════════════════ */
+[data-compact="true"] .magic-bento-card:nth-child(4) .magic-bento-card__content > div > div {
+  top: 0 !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   PEDAL / LOOPER OVERLAY
+   .po-overlay has top:−33vh which drops the panel below centre on a
+   480 px screen. Reset to top:0 and allow the panel to scroll vertically
+   so even the widest EQ (11 knobs wrapping to 2–3 rows) stays usable.
+   ═══════════════════════════════════════════════════════════════════════ */
+[data-compact="true"] .po-overlay {
+  top: 0 !important;
+  align-items: flex-start !important;
+  padding-top: 6px !important;
+}
+
+/* height:30vh inline on .po-panel (~144 px) is too small for knobs —
+   !important in CSS overrides inline styles, so this actually works. */
+[data-compact="true"] .po-panel {
+  height: auto !important;
+  max-height: calc(100dvh - 12px) !important;
+  overflow-y: auto !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   MINOR TYPOGRAPHY / SPACING POLISH
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* Smaller label so the header wastes less vertical space */
+[data-compact="true"] .magic-bento-card__label {
+  font-size: 11px !important;
+}
+
+/* Tighten the card header padding */
+[data-compact="true"] .magic-bento-card__header {
+  padding-bottom: 2px !important;
+}
+
+/* Knob labels and values — slightly smaller so more knobs fit per row */
+[data-compact="true"] .po-knob__label {
+  font-size: 9px !important;
+}
+
+[data-compact="true"] .po-knob__value {
+  font-size: 10px !important;
+}
+
+/* ── Light-mode compact — no extra colour overrides needed;
+   the existing [data-theme="light"] rules in each component's CSS
+   continue to apply alongside these compact rules. ── */

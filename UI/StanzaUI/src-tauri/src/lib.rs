@@ -82,6 +82,22 @@ fn build_param_packet(pedal_id: u8, enabled: bool, params: &[f32]) -> Vec<u8> {
     pkt
 }
 
+/// TYPE B — loop audio for DAC mix: [0xAA][0x56][n][n×int16 LE][XOR]
+fn build_loop_audio_packet(samples: &[i16]) -> Vec<u8> {
+    let n = samples.len().min(255) as u8;
+    let mut pkt: Vec<u8> = vec![0xAA, 0x56, n];
+    for &s in &samples[..n as usize] {
+        pkt.extend_from_slice(&s.to_le_bytes());
+    }
+    let checksum: u8 = pkt[2..].iter().fold(0u8, |acc, &b| acc ^ b);
+    pkt.push(checksum);
+    pkt
+}
+
+fn loop_sample_mixed(raw: i16, mix: f32) -> i16 {
+    (raw as f32 * mix).clamp(-32768.0, 32767.0) as i16
+}
+
 // ── Shared write helper ───────────────────────────────────────────────────────
 
 fn write_packet(app: &tauri::AppHandle, pkt: &[u8]) -> Result<(), String> {
@@ -305,14 +321,13 @@ async fn stream_audio(app: tauri::AppHandle) {
 /// Open a serial port and stream audio.
 ///
 /// Architecture: the ESP32 sends processed audio to the host one-way.
-/// The looper is handled entirely on the host:
+/// The looper buffer lives on the host:
 ///   - Recording   → append i16 samples to LoopBuffer
-///   - Playing     → mix loop samples into chunk_f32 before emitting
-///   - Overdubbing → peek loop (for monitoring), overdub into loop, mix peek into chunk_f32
+///   - Playing     → mix loop into monitor + send TYPE B packets to ESP32 DAC
+///   - Overdubbing → peek loop for monitor/DAC, overdub into loop buffer
 ///
-/// No audio is ever sent back to the ESP32. This eliminates the serial
-/// bandwidth contention that previously garbled the audio stream.
-/// The loop is heard through the computer Monitor (enable in the Status card).
+/// Loop playback is sent back as framed TYPE B serial packets (0xAA 0x56)
+/// so the ESP32 can mix it into the I2S DAC output alongside live DSP.
 #[tauri::command]
 async fn stream_audio_serial(app: tauri::AppHandle, port_name: String, baud_rate: u32) {
     {
@@ -353,43 +368,41 @@ async fn stream_audio_serial(app: tauri::AppHandle, port_name: String, baud_rate
                     }
                     if chunk_i16.is_empty() { continue; }
 
-                    // ── Looper: capture or mix into the live stream ───────────────────
-                    //
-                    // Loop audio is blended directly into chunk_f32 here on the host.
-                    // No data travels back to the ESP32, so serial bandwidth is never
-                    // contested — the garbled-audio bug is eliminated.
+                    // ── Looper: capture, monitor mix, and DAC loop stream ─────────────
+                    let mut loop_for_dac: Vec<i16> = Vec::new();
                     {
                         let state = app.state::<LoopState>();
                         let mut lb = state.0.lock().unwrap();
                         match lb.state {
                             LooperState::Recording => {
-                                // Capture the live DSP-processed signal into the loop.
                                 lb.samples.extend_from_slice(&chunk_i16);
                             }
                             LooperState::Playing => {
-                                // Mix loop samples into the monitor stream.
                                 let slice = take_playback_chunk(&mut lb, chunk_i16.len());
                                 let mix = lb.mix;
+                                loop_for_dac = slice.iter().map(|&s| loop_sample_mixed(s, mix)).collect();
                                 for (dst, &s) in chunk_f32.iter_mut().zip(slice.iter()) {
                                     *dst = (*dst + s as f32 / 32767.0 * mix).clamp(-1.0, 1.0);
                                 }
                             }
                             LooperState::Overdubbing => {
-                                // Peek at the current loop frame BEFORE overdubbing so
-                                // the monitor hears live + loop with no double-counted
-                                // live signal (avoids live×(1+mix) artefact).
                                 let loop_preview = peek_loop_chunk(&lb, chunk_f32.len());
                                 let mix = lb.mix;
-                                // Blend live into the loop (advances play_pos).
+                                loop_for_dac = loop_preview
+                                    .iter()
+                                    .map(|&ls| (ls * 32767.0 * mix).clamp(-32768.0, 32767.0) as i16)
+                                    .collect();
                                 overdub_and_advance(&mut lb, &chunk_i16);
-                                // Mix pre-overdub loop frame into monitor stream.
                                 for (dst, &ls) in chunk_f32.iter_mut().zip(loop_preview.iter()) {
                                     *dst = (*dst + ls * mix).clamp(-1.0, 1.0);
                                 }
                             }
                             _ => {}
                         }
-                        // lock drops here
+                    }
+
+                    if !loop_for_dac.is_empty() {
+                        let _ = write_packet(&app, &build_loop_audio_packet(&loop_for_dac));
                     }
 
                     // ── Throttled looper_info event (~10 Hz) ──────────────────────────

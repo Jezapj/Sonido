@@ -10,104 +10,198 @@ extern "C" {
     #include "pedal_dist.h"
     #include "pedal_phaser.h"
     #include "pedal_reverb.h"
+    #include "pedal_octave.h"
+    #include "pedal_fuzz.h"
 }
 
 // ── Pedal slot IDs ────────────────────────────────────────────────────────────
 // Must match PEDAL_IDS in PedalOverlay.tsx and pedal_id values in lib.rs.
-#define PEDAL_EQ_PREGAIN  0
-#define PEDAL_CHORUS      1
-#define PEDAL_PHASER      2
-#define PEDAL_OVERDRIVE   3
-#define PEDAL_DISTORTION  4
-#define PEDAL_REVERB      5
+#define PEDAL_OCTAVE      0
+#define PEDAL_EQ_PREGAIN  1
+#define PEDAL_FUZZ        2
+#define PEDAL_EQ_PREGAIN2  3
+#define PEDAL_CHORUS      4
+#define PEDAL_PHASER      5
+#define PEDAL_OVERDRIVE   6
+#define PEDAL_DISTORTION  7
+#define PEDAL_REVERB      8
 
 // ── Audio config ──────────────────────────────────────────────────────────────
 #define SAMPLE_RATE 47991
 #define BLOCK_SIZE  64
 
-// ── Packet protocol (TYPE A — DSP params only) ────────────────────────────────
+// ── Packet protocol ───────────────────────────────────────────────────────────
 //
-//   [0xAA][0x55][pedal_id][enabled][n_params][float×n][XOR checksum]
+// TYPE A — DSP params:  [0xAA][0x55][pedal_id][enabled][n_params][float×n][XOR]
+// TYPE B — loop audio:  [0xAA][0x56][n_samples][int16×n][XOR]
 //
 // Checksum: XOR of every byte from index 2 to the byte before the checksum.
 //
-// NOTE: The looper is handled entirely on the host (Rust / lib.rs).
-// The ESP32 only sends processed audio to the host and receives DSP param
-// packets. No audio is ever sent back over serial, which eliminates the
-// bandwidth contention that previously garbled the audio stream.
+// The looper buffer lives on the host (Rust / lib.rs). During playback the host
+// sends TYPE B packets so the ESP32 can mix loop audio into the DAC output.
 
 #define PKT_MAX_PARAMS   16
 #define PKT_HEADER_SIZE  5
 #define PKT_BUF_SIZE     80   // 5 header + 16×4 data + 1 checksum = 70; +10 margin
+#define LOOP_PKT_MAX     (BLOCK_SIZE + 4)  // header + max samples + checksum
+
+// ── Loop-audio ring buffer (host → DAC mix) ───────────────────────────────────
+#define LOOP_RING_SIZE   2048
+static int16_t s_loop_ring[LOOP_RING_SIZE];
+static int     s_loop_ring_w = 0;
+static int     s_loop_ring_r = 0;
+
+static int loop_ring_count(void)
+{
+    return (s_loop_ring_w - s_loop_ring_r + LOOP_RING_SIZE) % LOOP_RING_SIZE;
+}
+
+static void loop_ring_push(int16_t s)
+{
+    if (loop_ring_count() >= LOOP_RING_SIZE - 1) return;
+    s_loop_ring[s_loop_ring_w] = s;
+    s_loop_ring_w = (s_loop_ring_w + 1) % LOOP_RING_SIZE;
+}
+
+static int16_t loop_ring_pop(void)
+{
+    if (s_loop_ring_r == s_loop_ring_w) return 0;
+    int16_t s = s_loop_ring[s_loop_ring_r];
+    s_loop_ring_r = (s_loop_ring_r + 1) % LOOP_RING_SIZE;
+    return s;
+}
 
 // ── Packet parser state ───────────────────────────────────────────────────────
-static uint8_t s_pkt[PKT_BUF_SIZE];
-static int     s_pkt_idx  = 0;
-static uint8_t s_n_params = 0;
+enum PktKind { PKT_NONE = 0, PKT_PARAM, PKT_LOOP };
+
+static uint8_t  s_pkt[PKT_BUF_SIZE];
+static int      s_pkt_idx   = 0;
+static uint8_t  s_n_params = 0;
+static PktKind  s_pkt_kind  = PKT_NONE;
+
+static uint8_t  s_loop_pkt[LOOP_PKT_MAX];
+static int      s_loop_idx  = 0;
+static uint8_t  s_loop_n    = 0;
 
 // ── I2S handles ───────────────────────────────────────────────────────────────
 static i2s_chan_handle_t tx_handle;
 static i2s_chan_handle_t rx_handle;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// check_serial_params()
-//
-// Non-blocking UART drain called once per audio block. Handles TYPE A
-// DSP parameter packets only.
+// reset_serial_parsers()
 // ─────────────────────────────────────────────────────────────────────────────
-static void check_serial_params(void)
+static void reset_serial_parsers(void)
+{
+    s_pkt_idx  = 0;
+    s_pkt_kind = PKT_NONE;
+    s_loop_idx = 0;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// drain_serial()
+//
+// Non-blocking UART drain. Handles TYPE A (DSP params) and TYPE B (loop audio).
+// ─────────────────────────────────────────────────────────────────────────────
+static void drain_serial(void)
 {
     while (Serial.available() > 0)
     {
         uint8_t b = (uint8_t)Serial.read();
 
-        // Sync on magic start byte
-        if (b == 0xAA && s_pkt_idx == 0) {
-            s_pkt[s_pkt_idx++] = b;
+        // ── TYPE B loop-audio packet in progress ─────────────────────────────
+        if (s_pkt_kind == PKT_LOOP) {
+            if (s_loop_idx >= LOOP_PKT_MAX) { reset_serial_parsers(); continue; }
+            s_loop_pkt[s_loop_idx++] = b;
+
+            if (s_loop_idx == 3) {
+                s_loop_n = s_loop_pkt[2];
+                if (s_loop_n == 0 || s_loop_n > BLOCK_SIZE) {
+                    reset_serial_parsers();
+                    continue;
+                }
+            }
+            if (s_loop_idx < 3) continue;
+
+            int expected = 3 + s_loop_n * 2 + 1;
+            if (s_loop_idx < expected) continue;
+
+            uint8_t csum = 0;
+            for (int i = 2; i < expected - 1; i++) csum ^= s_loop_pkt[i];
+            if (csum == s_loop_pkt[expected - 1]) {
+                for (int i = 0; i < s_loop_n; i++) {
+                    int16_t s = (int16_t)(s_loop_pkt[3 + i * 2]
+                               | (s_loop_pkt[4 + i * 2] << 8));
+                    loop_ring_push(s);
+                }
+            }
+            reset_serial_parsers();
             continue;
         }
 
-        // Second byte must be 0x55 (DSP param packet); anything else → resync
+        // ── TYPE A param packet in progress ──────────────────────────────────
+        if (s_pkt_kind == PKT_PARAM) {
+            if (s_pkt_idx >= PKT_BUF_SIZE) { reset_serial_parsers(); continue; }
+            s_pkt[s_pkt_idx++] = b;
+
+            if (s_pkt_idx == PKT_HEADER_SIZE) {
+                s_n_params = s_pkt[4];
+                if (s_n_params > PKT_MAX_PARAMS) { reset_serial_parsers(); continue; }
+            }
+            if (s_pkt_idx < PKT_HEADER_SIZE) continue;
+
+            int expected = PKT_HEADER_SIZE + s_n_params * 4 + 1;
+            if (s_pkt_idx < expected) continue;
+
+            uint8_t csum = 0;
+            for (int i = 2; i < expected - 1; i++) csum ^= s_pkt[i];
+            if (csum == s_pkt[expected - 1]) {
+                uint8_t pedal_id = s_pkt[2];
+                bool    enabled  = (s_pkt[3] != 0);
+                float params[PKT_MAX_PARAMS];
+                memcpy(params, s_pkt + PKT_HEADER_SIZE, s_n_params * sizeof(float));
+                pedal_dispatch_params(pedal_id, enabled, params, s_n_params);
+            }
+            reset_serial_parsers();
+            continue;
+        }
+
+        // ── Idle: sync on magic start byte ───────────────────────────────────
+        if (b == 0xAA) {
+            s_pkt[0] = b;
+            s_pkt_idx = 1;
+            continue;
+        }
+
+        // ── Second byte selects packet type ──────────────────────────────────
         if (s_pkt_idx == 1) {
             if (b == 0x55) {
-                s_pkt[s_pkt_idx++] = b;
+                s_pkt[1] = b;
+                s_pkt_idx = 2;
+                s_pkt_kind = PKT_PARAM;
+            } else if (b == 0x56) {
+                s_loop_pkt[0] = 0xAA;
+                s_loop_pkt[1] = 0x56;
+                s_loop_idx = 2;
+                s_pkt_kind = PKT_LOOP;
             } else {
-                s_pkt_idx = 0;
+                reset_serial_parsers();
             }
-            continue;
         }
+    }
+}
 
-        // Guard against buffer overrun
-        if (s_pkt_idx >= PKT_BUF_SIZE) {
-            s_pkt_idx = 0;
-            continue;
-        }
-
-        s_pkt[s_pkt_idx++] = b;
-
-        // Once the 5-byte header is complete, capture n_params
-        if (s_pkt_idx == PKT_HEADER_SIZE) {
-            s_n_params = s_pkt[4];
-            if (s_n_params > PKT_MAX_PARAMS) { s_pkt_idx = 0; continue; }
-        }
-        if (s_pkt_idx < PKT_HEADER_SIZE) continue;
-
-        int expected = PKT_HEADER_SIZE + s_n_params * 4 + 1;
-        if (s_pkt_idx < expected) continue;
-
-        // Verify checksum
-        uint8_t csum = 0;
-        for (int i = 2; i < expected - 1; i++) csum ^= s_pkt[i];
-        if (csum != s_pkt[expected - 1]) { s_pkt_idx = 0; continue; }
-
-        uint8_t pedal_id = s_pkt[2];
-        bool    enabled  = (s_pkt[3] != 0);
-
-        float params[PKT_MAX_PARAMS];
-        memcpy(params, s_pkt + PKT_HEADER_SIZE, s_n_params * sizeof(float));
-
-        pedal_dispatch_params(pedal_id, enabled, params, s_n_params);
-        s_pkt_idx = 0;
+// ─────────────────────────────────────────────────────────────────────────────
+// mix_loop_into_dac()
+//
+// Pop loop samples queued by TYPE B packets and add them to dsp_out.
+// ─────────────────────────────────────────────────────────────────────────────
+static void mix_loop_into_dac(float *dsp_out, int frames)
+{
+    for (int i = 0; i < frames; i++) {
+        float s = dsp_out[i] + (float)loop_ring_pop() / 32767.0f;
+        if (s >  1.0f) s =  1.0f;
+        if (s < -1.0f) s = -1.0f;
+        dsp_out[i] = s;
     }
 }
 
@@ -157,7 +251,10 @@ void setup()
     i2s_channel_enable(tx_handle);
 
     // ── Register pedals ───────────────────────────────────────────────────────
+    pedal_octave_init    (PEDAL_OCTAVE,  (float)SAMPLE_RATE);
     pedal_eq_init    (PEDAL_EQ_PREGAIN,  (float)SAMPLE_RATE);
+    pedal_fuzz_init    (PEDAL_FUZZ,  (float)SAMPLE_RATE);
+    pedal_eq_init    (PEDAL_EQ_PREGAIN2,  (float)SAMPLE_RATE);
     pedal_chorus_init(PEDAL_CHORUS,      (float)SAMPLE_RATE);
     pedal_phaser_init(PEDAL_PHASER,      (float)SAMPLE_RATE);
     pedal_od_init    (PEDAL_OVERDRIVE,   (float)SAMPLE_RATE);
@@ -185,8 +282,8 @@ void loop()
     i2s_channel_read(rx_handle, rx_buf, sizeof(rx_buf),
                      &bytes_read, portMAX_DELAY);
 
-    // Check for incoming DSP param packets (non-blocking)
-    check_serial_params();
+    // Drain any pending host packets (DSP params + loop audio).
+    drain_serial();
 
     int frames = bytes_read >> 2; // 4 bytes per stereo int16 frame
 
@@ -200,8 +297,6 @@ void loop()
     pedal_process_chain(dsp_in, dsp_out, dsp_temp, frames);
 
     // ── Serial stream → host (mono int16 PCM for waveform / looper capture) ───
-    // The host records this stream into the looper and mixes playback on its
-    // side — no audio is ever sent back over serial.
     int16_t serial_buf[BLOCK_SIZE];
     for (int i = 0; i < frames; i++) {
         float s = dsp_out[i];
@@ -210,6 +305,15 @@ void loop()
         serial_buf[i] = (int16_t)(s * 32767.0f);
     }
     Serial.write((uint8_t *)serial_buf, frames * sizeof(int16_t));
+
+    // Brief window for the host to return TYPE B loop-audio for this block.
+    unsigned long deadline = micros() + 800;
+    while (micros() < deadline && Serial.available() > 0) {
+        drain_serial();
+    }
+
+    // Mix host loop playback into the live DSP signal before the DAC.
+    mix_loop_into_dac(dsp_out, frames);
 
     // ── Mono float → stereo int32 → DAC ──────────────────────────────────────
     for (int i = 0; i < frames; i++) {
