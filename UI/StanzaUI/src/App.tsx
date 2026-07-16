@@ -168,29 +168,37 @@ function App() {
       <div style={{ position: 'absolute', width: '100%', height: '100%', zIndex: -1 }}>
         <div style={{
           position: 'absolute', width: '100%', height: '100%',
-          opacity: bgVariant === 0 ? 1 : 1,
+          opacity: 1,
           transition: 'opacity 0.6s ease-in-out', pointerEvents: 'none',
         }}>
           {theme === "dark"
             ? floatingLinesBg
-            : <div style={{ width: '100%', height: '100%', backgroundColor: 'rgb(200,200,200)' }} />}
+            : (
+              <div
+                className="bg-dots"
+                style={{ width: '100%', height: '100%' }}
+                aria-hidden
+              />
+            )}
         </div>
-        <div style={{
-          position: 'absolute', width: '100%', height: '100%',
-          opacity: bgVariant === 1 ? 1 : 0.3,
-          transition: 'opacity 0.6s ease-in-out', pointerEvents: 'none',
-        }}>
-          <ShapeGrid
-            speed={shapeGridSpeed}
-            squareSize={40}
-            direction="diagonal"
-            borderColor={theme === 'light' ? 'rgba(100,100,100,0.7)' : 'rgba(255,255,255,0.3)'}
-            hoverFillColor="#222"
-            shape="square"
-            hoverTrailAmount={0}
-          />
-          {floatingLinesBg}
-        </div>
+        {theme === "dark" && (
+          <div style={{
+            position: 'absolute', width: '100%', height: '100%',
+            opacity: bgVariant === 1 ? 1 : 0.3,
+            transition: 'opacity 0.6s ease-in-out', pointerEvents: 'none',
+          }}>
+            <ShapeGrid
+              speed={shapeGridSpeed}
+              squareSize={40}
+              direction="diagonal"
+              borderColor="rgba(255,255,255,0.3)"
+              hoverFillColor="#222"
+              shape="square"
+              hoverTrailAmount={0}
+            />
+            {floatingLinesBg}
+          </div>
+        )}
       </div>
 
       {/* ── LANDING ── */}

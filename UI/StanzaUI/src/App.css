@@ -107,6 +107,28 @@ button {
 #greet-input {
   margin-right: 5px;
 }
+
+/* Soft dotted paper background — light mode only */
+.bg-dots {
+  position: absolute;
+  inset: 0;
+  background-color: rgb(var(--surface-body));
+  background-image:
+    radial-gradient(circle, rgba(150, 158, 172, 0.19) 1px, transparent 1.4px),
+    radial-gradient(125% 115% at 50% 35%, #fbfbfc 0%, #f0f1f4 48%, #dfe2e8 78%, #d2d5dc 100%);
+  background-size:
+    13px 13px,
+    100% 100%;
+  background-position:
+    0 0,
+    0 0;
+}
+
+[data-theme="light"] :root,
+:root[data-theme="light"] {
+  color: #1a0f2e;
+  background-color: #f4f2f0;
+}
 /* @media (max-height: 700px){
   :root{
     overflow-y: visible;

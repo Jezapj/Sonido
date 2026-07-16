@@ -53,9 +53,20 @@
    The 120 px FFT canvas is too tall for a ~196 px card when combined with
    the note display, buttons and status row. 72 px keeps everything visible.
    ═══════════════════════════════════════════════════════════════════════ */
-[data-compact="true"] .magic-bento-card:nth-child(1) canvas {
+[data-compact="true"] .magic-bento-card:nth-child(1) canvas,
+[data-compact="true"] .magic-bento-card:nth-child(1) .da-fft-canvas {
   height: 72px !important;
   max-height: 72px !important;
+}
+
+[data-compact="true"] .magic-bento-card:nth-child(1) .da-metro,
+[data-compact="true"] .magic-bento-card:nth-child(1) .da-chords {
+  height: 140px !important;
+  gap: 4px !important;
+}
+
+[data-compact="true"] .magic-bento-card:nth-child(1) .da-carousel {
+  max-height: 150px;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════

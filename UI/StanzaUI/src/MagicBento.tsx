@@ -48,7 +48,7 @@ const MOBILE_BREAKPOINT        = 768;
 const cardColour = 'rgba(0, 0, 0, 0.92)';
 
 const STATIC_CARDS: Omit<BentoCardProps, 'content'>[] = [
-  { color: cardColour, title: 'Status',      description: 'Centralized data view', label: 'Dashboard', glowRgb: '132, 0, 255' },
+  { color: cardColour, title: 'Tools',       description: 'FFT · Metro · Songs',  label: 'Dashboard', glowRgb: '132, 0, 255' },
   { color: cardColour, title: 'FFT',         description: 'Waveform analysis',     label: 'Waveform',  glowRgb: '0, 0, 255'   },
 ];
 

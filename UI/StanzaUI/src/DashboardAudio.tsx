@@ -1,18 +1,24 @@
 import { useRef, useState, useCallback, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useSerialStream } from "./useSerialStream";
+import { useIsLightMode } from "./UseTheme";
+import DashboardMetronome from "./DashboardMetronome";
+import DashboardChordBank from "./DashboardChordBank";
 
 const BUFFER_LEN  = 4096;
 const SAMPLE_RATE = 47991;
 
-// Pitch detection window — fundamentals only
 const MIN_FREQ = 70;
 const MAX_FREQ = 400;
-
-// FFT display cutoff — shows harmonics up to this frequency.
 const MAX_DISPLAY_HZ = 4000;
 
-// ── FFT ──────────────────────────────────────────────────────────────────────
+const PANEL_COUNT = 3;
+const PANEL_W = 300;
+const SWIPE_THRESHOLD = 48;
+
+const PANEL_LABELS = ["FFT", "METRO", "SONGS"];
+
+// ── FFT helpers ───────────────────────────────────────────────────────────────
 function fft(re: Float32Array, im: Float32Array) {
   const N = re.length;
   for (let i = 0, j = 0; i < N; i++) {
@@ -90,8 +96,7 @@ function freqToNote(freq: number) {
   return `${names[idx]}${octave}`;
 }
 
-// ── Shared button style ───────────────────────────────────────────────────────
-const btnBase: React.CSSProperties = {
+const btnBaseDark: React.CSSProperties = {
   background: "transparent",
   border: "0.5px solid rgba(255,255,255,0.25)",
   color: "#ffffff",
@@ -105,8 +110,20 @@ const btnBase: React.CSSProperties = {
   whiteSpace: "nowrap" as const,
 };
 
+const btnBaseLight: React.CSSProperties = {
+  ...btnBaseDark,
+  border: "0.5px solid rgba(0,0,0,0.22)",
+  color: "#1a0f2e",
+};
+
 // ── Component ─────────────────────────────────────────────────────────────────
 export default function DashboardAudio() {
+  const light = useIsLightMode();
+  const btnBase = light ? btnBaseLight : btnBaseDark;
+  const accent = light ? "#6d28d9" : "#AFA9EC";
+  const muted = light ? "rgba(26,15,46,0.45)" : "rgba(255,255,255,0.45)";
+  const rootColor = light ? "#1a0f2e" : "white";
+
   const canvasRef   = useRef<HTMLCanvasElement>(null);
   const bufferRef   = useRef<Float32Array>(new Float32Array(BUFFER_LEN));
   const animRef     = useRef(0);
@@ -114,47 +131,48 @@ export default function DashboardAudio() {
   const prevFreqRef = useRef(0);
   const [note, setNote] = useState("—");
 
-  // ── Frontend audio monitoring (Web Audio API) ─────────────────────────────
-  const [isMonitoring, setIsMonitoring]   = useState(false);
-  const isMonitoringRef                   = useRef(false);
-  const audioCtxRef                       = useRef<AudioContext | null>(null);
-  const nextStartTimeRef                  = useRef<number>(0);
+  const [isMonitoring, setIsMonitoring] = useState(false);
+  const isMonitoringRef = useRef(false);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const nextStartTimeRef = useRef<number>(0);
 
-  // ── Hardware output mute ───────────────────────────────────────────────────
-  const [isMuted,       setIsMuted]       = useState(false);
-  const [muteLoading,   setMuteLoading]   = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+  const [muteLoading, setMuteLoading] = useState(false);
 
-  // Keep monitoring ref in sync and tear down AudioContext when toggled off
+  // ── Carousel ───────────────────────────────────────────────────────────────
+  const [page, setPage] = useState(0);
+  const [dragX, setDragX] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const dragStartX = useRef(0);
+  const dragStartPage = useRef(0);
+  const pageRef = useRef(0);
+
+  useEffect(() => { pageRef.current = page; }, [page]);
+
   useEffect(() => {
     isMonitoringRef.current = isMonitoring;
     if (!isMonitoring) {
       audioCtxRef.current?.close().catch(() => {});
-      audioCtxRef.current    = null;
+      audioCtxRef.current = null;
       nextStartTimeRef.current = 0;
     }
   }, [isMonitoring]);
 
-  // Cleanup AudioContext on unmount
   useEffect(() => {
     return () => {
       audioCtxRef.current?.close().catch(() => {});
     };
   }, []);
 
-  /**
-   * Schedule a Float32 chunk into the Web Audio API graph.
-   * Optimized for lowest latency monitoring with minimized padding/drift gates.
-   */
   const scheduleAudioChunk = useCallback((samples: number[]) => {
     if (!isMonitoringRef.current) return;
 
-    // Force context creation using 'interactive' latency hint path
     if (!audioCtxRef.current || audioCtxRef.current.state === "closed") {
       try {
-        audioCtxRef.current  = new AudioContext({ sampleRate: SAMPLE_RATE, latencyHint: "interactive" });
+        audioCtxRef.current = new AudioContext({ sampleRate: SAMPLE_RATE, latencyHint: "interactive" });
         nextStartTimeRef.current = 0;
       } catch {
-        return; // Browser blocked — silently skip
+        return;
       }
     }
 
@@ -162,7 +180,7 @@ export default function DashboardAudio() {
     if (ctx.state === "suspended") ctx.resume().catch(() => {});
 
     const floats = new Float32Array(samples);
-    const buf    = ctx.createBuffer(1, floats.length, SAMPLE_RATE);
+    const buf = ctx.createBuffer(1, floats.length, SAMPLE_RATE);
     buf.getChannelData(0).set(floats);
 
     const src = ctx.createBufferSource();
@@ -170,25 +188,18 @@ export default function DashboardAudio() {
     src.connect(ctx.destination);
 
     const now = ctx.currentTime;
-    
-    // Tight scheduling thresholds for real-time live playback
-    const LOOKAHEAD = 0.005; // 5ms lookahead baseline
-    const MAX_DRIFT = 0.030; // 30ms maximum allowed delay building up before flushing
+    const LOOKAHEAD = 0.005;
+    const MAX_DRIFT = 0.030;
 
-    // If the scheduled head falls behind real clock or drifts out past 30ms, hard reset to baseline
     if (nextStartTimeRef.current < now || nextStartTimeRef.current > now + MAX_DRIFT) {
       nextStartTimeRef.current = now + LOOKAHEAD;
     }
-    
+
     const startAt = nextStartTimeRef.current;
     src.start(startAt);
     nextStartTimeRef.current = startAt + buf.duration;
   }, []);
 
-  /**
-   * Toggle the hardware DAC output mute by sending a zero / restored pre_gain
-   * packet to the ESP32 EQ pedal via the `set_output_mute` Tauri command.
-   */
   const toggleHardwareMute = useCallback(async () => {
     const next = !isMuted;
     setMuteLoading(true);
@@ -202,7 +213,6 @@ export default function DashboardAudio() {
     }
   }, [isMuted]);
 
-  // ── Core audio ingest ──────────────────────────────────────────────────────
   const ingestChunk = useCallback((samples: number[]) => {
     let energy = 0;
     for (const s of samples) energy += s * s;
@@ -213,7 +223,6 @@ export default function DashboardAudio() {
     else { buf.copyWithin(0, len); buf.set(samples, BUFFER_LEN - len); }
   }, []);
 
-  // ── Draw loop (FFT + pitch) ────────────────────────────────────────────────
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -266,10 +275,9 @@ export default function DashboardAudio() {
     if (runningRef.current) animRef.current = requestAnimationFrame(draw);
   }, []);
 
-  // ── Unified chunk handler wired to the serial stream ──────────────────────
   const onChunk = useCallback((samples: number[]) => {
     ingestChunk(samples);
-    scheduleAudioChunk(samples); // no-op when monitoring is off
+    scheduleAudioChunk(samples);
     if (!runningRef.current) {
       runningRef.current = true;
       animRef.current = requestAnimationFrame(draw);
@@ -291,18 +299,58 @@ export default function DashboardAudio() {
     disconnect();
   };
 
-  // ── Render ─────────────────────────────────────────────────────────────────
+  // ── Carousel swipe (loops) ─────────────────────────────────────────────────
+  const wrapPage = (p: number) => ((p % PANEL_COUNT) + PANEL_COUNT) % PANEL_COUNT;
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    // Don't steal drags from sliders / buttons
+    const tag = (e.target as HTMLElement).tagName;
+    if (tag === "INPUT" || tag === "BUTTON" || tag === "SELECT" || tag === "TEXTAREA") return;
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    dragStartX.current = e.clientX;
+    dragStartPage.current = pageRef.current;
+    setDragging(true);
+    setDragX(0);
+  };
+
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (!dragging) return;
+    setDragX(e.clientX - dragStartX.current);
+  };
+
+  const finishDrag = (clientX: number) => {
+    if (!dragging) return;
+    const dx = clientX - dragStartX.current;
+    let next = dragStartPage.current;
+    if (dx <= -SWIPE_THRESHOLD) next = dragStartPage.current + 1;
+    else if (dx >= SWIPE_THRESHOLD) next = dragStartPage.current - 1;
+    setPage(wrapPage(next));
+    setDragX(0);
+    setDragging(false);
+  };
+
+  const onPointerUp = (e: React.PointerEvent) => {
+    finishDrag(e.clientX);
+  };
+
+  const goPage = (dir: -1 | 1) => {
+    setPage(p => wrapPage(p + dir));
+  };
+
+  const trackOffset = -page * PANEL_W + (dragging ? dragX : 0);
+
   return (
-    <div style={{ position: "absolute", bottom: 15, left: 10, color: "white" }}>
+    <div className="da-root" style={{ position: "absolute", bottom: 0, left: 10, color: rootColor }}>
       {!connected ? (
-        <div style={{ paddingLeft: "3.5vw" }}>
-          <h3>Not Connected</h3>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+        <div style={{ width: PANEL_W, marginBottom: 6 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
             <select
               value={selectedPort}
               onChange={e => setSelectedPort(e.target.value)}
               style={{
-                background: "#1a1a2e", color: "#fff", border: "1px solid #444",
+                background: light ? "rgba(0,0,0,0.04)" : "#1a1a2e",
+                color: rootColor,
+                border: light ? "1px solid rgba(0,0,0,0.2)" : "1px solid #444",
                 borderRadius: 6, padding: "4px 8px", fontSize: 12, flex: 1,
               }}
             >
@@ -311,20 +359,25 @@ export default function DashboardAudio() {
                 : ports.map(p => <option key={p} value={p}>{p}</option>)}
             </select>
             <button onClick={refreshPorts} title="Refresh ports" style={{
-              background: "transparent", border: "1px solid #555", color: "#aaa",
+              background: "transparent",
+              border: light ? "1px solid rgba(0,0,0,0.25)" : "1px solid #555",
+              color: light ? "rgba(26,15,46,0.55)" : "#aaa",
               borderRadius: 6, padding: "4px 8px", cursor: "pointer", fontSize: 12,
             }}>↺</button>
+            <button
+              onClick={connect}
+              disabled={!selectedPort}
+              style={{ ...btnBase, opacity: selectedPort ? 1 : 0.4, padding: "4px 10px" }}
+            >
+              Connect
+            </button>
           </div>
-          <button onClick={connect} disabled={!selectedPort} style={{ opacity: selectedPort ? 1 : 0.4 }}>
-            Connect
-          </button>
         </div>
       ) : (
         <>
-          {/* ── Status row ──────────────────────────────────────────────── */}
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <div style={{ width: 10, height: 10, borderRadius: "50%", background: "lime", flexShrink: 0 }} />
-            <h4 style={{ margin: 0 }}>Connected: {selectedPort}</h4>
+            <h4 style={{ margin: 0, fontSize: 13, color: rootColor }}>Connected: {selectedPort}</h4>
             <button
               onClick={handleDisconnect}
               style={{ ...btnBase, fontSize: 11, padding: "2px 8px" }}
@@ -333,8 +386,7 @@ export default function DashboardAudio() {
             </button>
           </div>
 
-          {/* ── Monitor & Mute controls ──────────────────────────────────── */}
-          <div style={{ display: "flex", gap: 6, marginTop: 10, marginBottom: "-10px" }}>
+          <div style={{ display: "flex", gap: 6, marginTop: 8, marginBottom: 4 }}>
             <button
               onClick={() => setIsMonitoring(v => !v)}
               title={isMonitoring
@@ -343,13 +395,17 @@ export default function DashboardAudio() {
               style={{
                 ...btnBase,
                 borderColor: isMonitoring
-                  ? "rgba(175,169,236,0.7)"
-                  : "rgba(255,255,255,0.25)",
-                color: isMonitoring ? "#AFA9EC" : "rgba(255,255,255,0.55)",
-                background: isMonitoring ? "rgba(175,169,236,0.12)" : "transparent",
+                  ? (light ? "rgba(109,40,217,0.55)" : "rgba(175,169,236,0.7)")
+                  : (light ? "rgba(0,0,0,0.22)" : "rgba(255,255,255,0.25)"),
+                color: isMonitoring
+                  ? accent
+                  : (light ? "rgba(26,15,46,0.55)" : "rgba(255,255,255,0.55)"),
+                background: isMonitoring
+                  ? (light ? "rgba(109,40,217,0.1)" : "rgba(175,169,236,0.12)")
+                  : "transparent",
               }}
             >
-              {isMonitoring ? "👂 Monitor: ON" : "👂 Monitor: OFF"}
+              {isMonitoring ? "Monitor: ON" : "Monitor: OFF"}
             </button>
 
             <button
@@ -363,24 +419,87 @@ export default function DashboardAudio() {
                 opacity: muteLoading ? 0.5 : 1,
                 borderColor: isMuted
                   ? "rgba(239,68,68,0.7)"
-                  : "rgba(255,255,255,0.25)",
-                color: isMuted ? "#ef4444" : "rgba(255,255,255,0.55)",
+                  : (light ? "rgba(0,0,0,0.22)" : "rgba(255,255,255,0.25)"),
+                color: isMuted ? "#ef4444" : (light ? "rgba(26,15,46,0.55)" : "rgba(255,255,255,0.55)"),
                 background: isMuted ? "rgba(239,68,68,0.10)" : "transparent",
               }}
             >
-              {isMuted ? "🔇 HW: Muted" : "🔊 HW: Live"}
+              {isMuted ? "HW: Muted" : "HW: Live"}
             </button>
-          </div>
-
-          {/* ── FFT canvas ──────────────────────────────────────────────── */}
-          <canvas ref={canvasRef} width={300} height={120} />
-
-          {/* ── Detected note ───────────────────────────────────────────── */}
-          <div style={{ marginTop: 10, fontSize: 30, fontWeight: "bold", color: "#AFA9EC" }}>
-            {note}
           </div>
         </>
       )}
+
+      {/* Carousel — available with or without serial */}
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        width: PANEL_W, marginBottom: 4, marginTop: connected ? 0 : 2,
+      }}>
+        <button type="button" onClick={() => goPage(-1)} style={{ ...btnBase, padding: "2px 8px" }}>‹</button>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span className="da-label" style={{
+            fontFamily: "monospace", fontSize: 10, letterSpacing: "0.12em",
+            color: muted,
+          }}>
+            {PANEL_LABELS[page]}
+          </span>
+          <div style={{ display: "flex", gap: 5 }}>
+            {PANEL_LABELS.map((_, i) => (
+              <button
+                key={i}
+                type="button"
+                onClick={() => setPage(i)}
+                aria-label={`Go to ${PANEL_LABELS[i]}`}
+                style={{
+                  width: 6, height: 6, borderRadius: "50%", padding: 0, border: "none",
+                  cursor: "pointer",
+                  background: i === page ? accent : (light ? "rgba(0,0,0,0.25)" : "rgba(255,255,255,0.25)"),
+                  boxShadow: i === page ? `0 0 6px ${accent}` : "none",
+                }}
+              />
+            ))}
+          </div>
+        </div>
+        <button type="button" onClick={() => goPage(1)} style={{ ...btnBase, padding: "2px 8px" }}>›</button>
+      </div>
+
+      <div
+        className="da-carousel"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+        style={{
+          width: PANEL_W,
+          overflow: "hidden",
+          touchAction: "pan-y",
+          cursor: dragging ? "grabbing" : "grab",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            width: PANEL_W * PANEL_COUNT,
+            transform: `translateX(${trackOffset}px)`,
+            transition: dragging ? "none" : "transform 0.28s cubic-bezier(0.22, 1, 0.36, 1)",
+          }}
+        >
+          <div style={{ width: PANEL_W, flexShrink: 0 }}>
+            <canvas ref={canvasRef} width={300} height={120} className="da-fft-canvas" />
+            <div className="da-accent" style={{ marginTop: 10, fontSize: 30, fontWeight: "bold", color: accent }}>
+              {note}
+            </div>
+          </div>
+
+          <div style={{ width: PANEL_W, flexShrink: 0 }}>
+            <DashboardMetronome />
+          </div>
+
+          <div style={{ width: PANEL_W, flexShrink: 0 }}>
+            <DashboardChordBank />
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
