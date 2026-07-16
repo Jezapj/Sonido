@@ -17,6 +17,7 @@ interface LooperInfo {
   progress:      number;   // 0.0 – 1.0
   mix:           number;
   feedback:      number;
+  monitor_live:  boolean;
 }
 
 interface LooperOverlayProps {
@@ -66,7 +67,7 @@ const MiniSlider: FC<{
       onChange={e => onChange(Number(e.target.value))}
       style={{
         WebkitAppearance: 'none', appearance: 'none',
-        width: '100%', height: 3, borderRadius: 999, outline: 'none', cursor: 'pointer',
+        width: '90%', height: 3, borderRadius: 99, outline: 'none', cursor: 'pointer',
         background: `linear-gradient(to right, rgba(132,0,255,0.8) ${((value - min) / (max - min)) * 100}%, rgba(255,255,255,0.12) 0%)`,
       }}
     />
@@ -81,11 +82,13 @@ const LooperOverlay: FC<LooperOverlayProps> = ({ item, onClose }) => {
   const light      = useIsLightMode();
 
   const [info, setInfo] = useState<LooperInfo>({
-    state: 'Idle', loop_len_secs: 0, play_pos_secs: 0, progress: 0, mix: 0.7, feedback: 0.9,
+    state: 'Idle', loop_len_secs: 0, play_pos_secs: 0, progress: 0,
+    mix: 1.0, feedback: 0.9, monitor_live: false,
   });
-  const [mix,      setMixLocal]      = useState(0.7);
-  const [feedback, setFeedbackLocal] = useState(0.9);
-  const [busy,     setBusy]          = useState(false);
+  const [mix,         setMixLocal]         = useState(1.0);
+  const [feedback,    setFeedbackLocal]    = useState(0.9);
+  const [monitorLive, setMonitorLiveLocal] = useState(false);
+  const [busy,        setBusy]             = useState(false);
 
   const meta = STATE_META[info.state] ?? STATE_META.Idle;
 
@@ -101,12 +104,16 @@ const LooperOverlay: FC<LooperOverlayProps> = ({ item, onClose }) => {
       setInfo(i);
       setMixLocal(i.mix);
       setFeedbackLocal(i.feedback);
+      setMonitorLiveLocal(!!i.monitor_live);
     }).catch(() => {});
 
     // Subscribe to throttled looper_info events (~10 Hz)
     let unlisten: UnlistenFn | null = null;
     listen<LooperInfo>('looper_info', e => {
       setInfo(e.payload);
+      if (typeof e.payload.monitor_live === 'boolean') {
+        setMonitorLiveLocal(e.payload.monitor_live);
+      }
     }).then(u => { unlisten = u; });
 
     return () => { unlisten?.(); };
@@ -155,6 +162,16 @@ const LooperOverlay: FC<LooperOverlayProps> = ({ item, onClose }) => {
     updateParams(mix, v);
   }, [mix, updateParams]);
 
+  const toggleMonitorLive = useCallback(async () => {
+    const next = !monitorLive;
+    setMonitorLiveLocal(next);
+    try {
+      const i = await invoke<LooperInfo>('set_looper_monitor_live', { monitorLive: next });
+      setInfo(i);
+      setMonitorLiveLocal(!!i.monitor_live);
+    } catch { /* ignore */ }
+  }, [monitorLive]);
+
   // ── Derived display values ────────────────────────────────────────────────
   const fmtTime = (s: number) => {
     const m = Math.floor(s / 60);
@@ -172,6 +189,7 @@ const LooperOverlay: FC<LooperOverlayProps> = ({ item, onClose }) => {
 
   const stopDisabled  = info.state === 'Idle' || info.state === 'Stopped';
   const clearDisabled = info.state === 'Idle';
+  const loopingActive = info.state === 'Playing' || info.state === 'Overdubbing';
 
   // ── Colour tokens ─────────────────────────────────────────────────────────
   const c = {
@@ -234,7 +252,7 @@ const LooperOverlay: FC<LooperOverlayProps> = ({ item, onClose }) => {
         <div
           ref={panelRef}
           className="po-panel"
-          style={{ background: c.panel, border: `1px solid ${c.border}`, height: '30vh', minHeight: '4vh' }}
+          style={{ background: c.panel, border: `1px solid ${c.border}`, height: '34vh', minHeight: '4vh', overflowY: 'visible', scrollbarWidth: 'none' }}
         >
 
           {/* ── Header ────────────────────────────────────────────────────── */}
@@ -344,10 +362,10 @@ const LooperOverlay: FC<LooperOverlayProps> = ({ item, onClose }) => {
               </div>
             </div>
 
-            {/* Mix + Feedback sliders */}
+            {/* Loop volume + Overdub decay */}
             <div style={{ display: 'flex', gap: '1.5rem', padding: '0.75rem 0 0.25rem' }}>
               <MiniSlider
-                label="Loop Mix" value={mix} min={0} max={1} step={0.01}
+                label="Loop Volume" value={mix} min={0} max={4} step={0.01}
                 onChange={onMixChange} light={light}
               />
               <MiniSlider
@@ -356,11 +374,51 @@ const LooperOverlay: FC<LooperOverlayProps> = ({ item, onClose }) => {
               />
             </div>
 
+            {/* Monitor live input while looping */}
+            <div style={{ padding: '0.65rem 0 0.15rem' }}>
+              <button
+                type="button"
+                onClick={toggleMonitorLive}
+                disabled={busy}
+                style={{
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 12,
+                  padding: '10px 12px',
+                  borderRadius: 10,
+                  cursor: 'pointer',
+                  fontFamily: "'Courier New', monospace",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  letterSpacing: '0.06em',
+                  transition: 'background 0.15s, border-color 0.15s, opacity 0.15s',
+                  background: monitorLive
+                    ? (light ? 'rgba(34,197,94,0.12)' : 'rgba(34,197,94,0.18)')
+                    : (light ? 'rgba(0,0,0,0.04)' : 'rgba(255,255,255,0.04)'),
+                  border: `1px solid ${monitorLive
+                    ? 'rgba(34,197,94,0.45)'
+                    : (light ? 'rgba(0,0,0,0.1)' : 'rgba(255,255,255,0.1)')}`,
+                  color: monitorLive
+                    ? (light ? 'rgba(22,101,52,0.95)' : 'rgba(134,239,172,0.95)')
+                    : (light ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.45)'),
+                  opacity: busy ? 0.5 : 1,
+                }}
+              >
+                <span>MONITOR LIVE INPUT</span>
+                <span style={{ fontWeight: 800 }}>
+                  {monitorLive ? 'ON' : 'OFF'}
+                  {loopingActive && !monitorLive ? ' · LOOP ONLY' : ''}
+                </span>
+              </button>
+            </div>
+
           </div>
 
           {/* ── Hint ──────────────────────────────────────────────────────── */}
           <div className="po-hint" style={{ color: c.hint }}>
-            TAP to record → stop → overdub · STOP keeps loop · CLEAR wipes
+            While playing, monitor defaults to loop only · CLEAR restores live monitor
           </div>
         </div>
       </div>

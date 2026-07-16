@@ -25,23 +25,28 @@ impl std::fmt::Display for LooperState {
 }
 
 pub struct LoopBuffer {
-    pub state:    LooperState,
-    pub samples:  Vec<i16>,
-    pub loop_len: usize,
-    pub play_pos: usize,
-    pub mix:      f32,
-    pub feedback: f32,
+    pub state:         LooperState,
+    pub samples:       Vec<i16>,
+    pub loop_len:      usize,
+    pub play_pos:      usize,
+    /// Loop playback level into the live monitor (0..=4 makeup gain).
+    pub mix:           f32,
+    pub feedback:      f32,
+    /// When false (default), Playing/Overdubbing replace the monitor with
+    /// loop-only audio. When true, live input is mixed in alongside the loop.
+    pub monitor_live:  bool,
 }
 
 impl Default for LoopBuffer {
     fn default() -> Self {
         Self {
-            state:    LooperState::Idle,
-            samples:  Vec::new(),
-            loop_len: 0,
-            play_pos: 0,
-            mix:      0.7,
-            feedback: 0.9,
+            state:        LooperState::Idle,
+            samples:      Vec::new(),
+            loop_len:     0,
+            play_pos:     0,
+            mix:          1.0,
+            feedback:     0.9,
+            monitor_live: false,
         }
     }
 }
@@ -56,6 +61,7 @@ pub struct LooperInfo {
     pub progress:      f32,
     pub mix:           f32,
     pub feedback:      f32,
+    pub monitor_live:  bool,
 }
 
 // ── Shared state ──────────────────────────────────────────────────────────────
@@ -80,22 +86,6 @@ fn build_param_packet(pedal_id: u8, enabled: bool, params: &[f32]) -> Vec<u8> {
     let checksum: u8 = pkt[2..].iter().fold(0u8, |acc, &b| acc ^ b);
     pkt.push(checksum);
     pkt
-}
-
-/// TYPE B — loop audio for DAC mix: [0xAA][0x56][n][n×int16 LE][XOR]
-fn build_loop_audio_packet(samples: &[i16]) -> Vec<u8> {
-    let n = samples.len().min(255) as u8;
-    let mut pkt: Vec<u8> = vec![0xAA, 0x56, n];
-    for &s in &samples[..n as usize] {
-        pkt.extend_from_slice(&s.to_le_bytes());
-    }
-    let checksum: u8 = pkt[2..].iter().fold(0u8, |acc, &b| acc ^ b);
-    pkt.push(checksum);
-    pkt
-}
-
-fn loop_sample_mixed(raw: i16, mix: f32) -> i16 {
-    (raw as f32 * mix).clamp(-32768.0, 32767.0) as i16
 }
 
 // ── Shared write helper ───────────────────────────────────────────────────────
@@ -149,6 +139,19 @@ fn overdub_and_advance(lb: &mut LoopBuffer, live: &[i16]) {
     }
 }
 
+/// Write loop samples into the host monitor chunk.
+/// `monitor_live == false` → replace live with loop-only; otherwise mix both.
+fn apply_loop_to_monitor(chunk_f32: &mut [f32], loop_f: &[f32], mix: f32, monitor_live: bool) {
+    for (dst, &ls) in chunk_f32.iter_mut().zip(loop_f.iter()) {
+        let loop_samp = ls * mix;
+        *dst = if monitor_live {
+            (*dst + loop_samp).clamp(-1.0, 1.0)
+        } else {
+            loop_samp.clamp(-1.0, 1.0)
+        };
+    }
+}
+
 fn snapshot(lb: &LoopBuffer) -> LooperInfo {
     let loop_len_secs = lb.loop_len as f32 / LOOPER_SAMPLE_RATE;
     let play_pos_secs = lb.play_pos as f32 / LOOPER_SAMPLE_RATE;
@@ -162,8 +165,9 @@ fn snapshot(lb: &LoopBuffer) -> LooperInfo {
         loop_len_secs,
         play_pos_secs,
         progress,
-        mix:      lb.mix,
-        feedback: lb.feedback,
+        mix:          lb.mix,
+        feedback:     lb.feedback,
+        monitor_live: lb.monitor_live,
     }
 }
 
@@ -255,32 +259,47 @@ async fn looper_stop(app: tauri::AppHandle) -> Result<LooperInfo, String> {
     Ok(info)
 }
 
-/// Wipe the loop buffer and return to Idle.
+/// Wipe the loop buffer and return to Idle (restores normal live monitor).
 #[tauri::command]
 async fn looper_clear(app: tauri::AppHandle) -> Result<LooperInfo, String> {
     let info;
     {
         let state = app.state::<LoopState>();
         let mut lb = state.0.lock().map_err(|e| e.to_string())?;
-        let (mix, feedback) = (lb.mix, lb.feedback);
-        *lb = LoopBuffer { mix, feedback, ..LoopBuffer::default() };
+        let (mix, feedback, monitor_live) = (lb.mix, lb.feedback, lb.monitor_live);
+        *lb = LoopBuffer { mix, feedback, monitor_live, ..LoopBuffer::default() };
         info = snapshot(&lb);
     }
     let _ = app.emit("looper_info", info.clone());
     Ok(info)
 }
 
-/// Update mix and feedback levels.
+/// Update loop volume (mix) and overdub feedback.
 #[tauri::command]
 async fn set_looper_params(app: tauri::AppHandle, mix: f32, feedback: f32) -> Result<LooperInfo, String> {
     let info;
     {
         let state = app.state::<LoopState>();
         let mut lb = state.0.lock().map_err(|e| e.to_string())?;
-        lb.mix      = mix.clamp(0.0, 1.0);
+        lb.mix      = mix.clamp(0.0, 4.0);
         lb.feedback = feedback.clamp(0.5, 1.0);
         info        = snapshot(&lb);
     }
+    Ok(info)
+}
+
+/// When playing a loop: if `monitor_live` is false, the live monitor hears
+/// only the recorded loop; if true, live input is mixed in as well.
+#[tauri::command]
+async fn set_looper_monitor_live(app: tauri::AppHandle, monitor_live: bool) -> Result<LooperInfo, String> {
+    let info;
+    {
+        let state = app.state::<LoopState>();
+        let mut lb = state.0.lock().map_err(|e| e.to_string())?;
+        lb.monitor_live = monitor_live;
+        info = snapshot(&lb);
+    }
+    let _ = app.emit("looper_info", info.clone());
     Ok(info)
 }
 
@@ -321,13 +340,12 @@ async fn stream_audio(app: tauri::AppHandle) {
 /// Open a serial port and stream audio.
 ///
 /// Architecture: the ESP32 sends processed audio to the host one-way.
-/// The looper buffer lives on the host:
-///   - Recording   → append i16 samples to LoopBuffer
-///   - Playing     → mix loop into monitor + send TYPE B packets to ESP32 DAC
-///   - Overdubbing → peek loop for monitor/DAC, overdub into loop buffer
-///
-/// Loop playback is sent back as framed TYPE B serial packets (0xAA 0x56)
-/// so the ESP32 can mix it into the I2S DAC output alongside live DSP.
+/// The looper buffer lives on the host and plays back through the GUI
+/// live monitor (`audio_chunk`) only:
+///   - Recording   → append i16 samples; monitor stays live
+///   - Playing     → loop into monitor (optionally mute live via monitor_live)
+///   - Overdubbing → same monitor behaviour + overdub into buffer
+///   - Idle/Stopped/Clear → normal live monitor passthrough
 #[tauri::command]
 async fn stream_audio_serial(app: tauri::AppHandle, port_name: String, baud_rate: u32) {
     {
@@ -368,8 +386,7 @@ async fn stream_audio_serial(app: tauri::AppHandle, port_name: String, baud_rate
                     }
                     if chunk_i16.is_empty() { continue; }
 
-                    // ── Looper: capture, monitor mix, and DAC loop stream ─────────────
-                    let mut loop_for_dac: Vec<i16> = Vec::new();
+                    // ── Looper: capture + live-monitor playback ───────────────────────
                     {
                         let state = app.state::<LoopState>();
                         let mut lb = state.0.lock().unwrap();
@@ -380,29 +397,23 @@ async fn stream_audio_serial(app: tauri::AppHandle, port_name: String, baud_rate
                             LooperState::Playing => {
                                 let slice = take_playback_chunk(&mut lb, chunk_i16.len());
                                 let mix = lb.mix;
-                                loop_for_dac = slice.iter().map(|&s| loop_sample_mixed(s, mix)).collect();
-                                for (dst, &s) in chunk_f32.iter_mut().zip(slice.iter()) {
-                                    *dst = (*dst + s as f32 / 32767.0 * mix).clamp(-1.0, 1.0);
-                                }
+                                let monitor_live = lb.monitor_live;
+                                let loop_f: Vec<f32> = slice
+                                    .iter()
+                                    .map(|&s| s as f32 / 32767.0)
+                                    .collect();
+                                apply_loop_to_monitor(&mut chunk_f32, &loop_f, mix, monitor_live);
                             }
                             LooperState::Overdubbing => {
                                 let loop_preview = peek_loop_chunk(&lb, chunk_f32.len());
                                 let mix = lb.mix;
-                                loop_for_dac = loop_preview
-                                    .iter()
-                                    .map(|&ls| (ls * 32767.0 * mix).clamp(-32768.0, 32767.0) as i16)
-                                    .collect();
+                                let monitor_live = lb.monitor_live;
                                 overdub_and_advance(&mut lb, &chunk_i16);
-                                for (dst, &ls) in chunk_f32.iter_mut().zip(loop_preview.iter()) {
-                                    *dst = (*dst + ls * mix).clamp(-1.0, 1.0);
-                                }
+                                apply_loop_to_monitor(&mut chunk_f32, &loop_preview, mix, monitor_live);
                             }
+                            // Idle / Stopped → leave chunk_f32 as live passthrough
                             _ => {}
                         }
-                    }
-
-                    if !loop_for_dac.is_empty() {
-                        let _ = write_packet(&app, &build_loop_audio_packet(&loop_for_dac));
                     }
 
                     // ── Throttled looper_info event (~10 Hz) ──────────────────────────
@@ -511,6 +522,7 @@ pub fn run() {
             looper_stop,
             looper_clear,
             set_looper_params,
+            set_looper_monitor_live,
             get_looper_info,
         ])
         .run(tauri::generate_context!())
