@@ -11,6 +11,7 @@ export interface AppSettings {
   particles:   boolean;       // Star particles on card hover — maps to MagicBento enableStars
   parallax:    boolean;       // Mouse-reactive floating lines — maps to FloatingLines parallax
   dockMag:     number;        // Dock icon magnification on hover — maps to Dock magnification
+  bgPattern:   'dots' | 'grid'; // Global background texture (both themes)
   gridSpeed:   number;        // ShapeGrid animation speed (slider 1–20 → speed 0.1–2.0)
   audioBuffer: 512 | 1024;   // ESP32 DMA buffer size preference (takes effect on firmware recompile)
 }
@@ -20,6 +21,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   particles:   true,
   parallax:    true,
   dockMag:     200,
+  bgPattern:   'dots',
   gridSpeed:   5,
   audioBuffer: 1024,
 };
@@ -169,8 +171,28 @@ const Settings: React.FC<SettingsProps> = ({
               checked={settings.parallax}
               onChange={set('parallax')}
               label="Parallax Background"
-              description="Mouse-reactive floating lines"
+              description="Mouse-reactive floating lines (dark mode)"
             />
+            <div className="settings-theme-row">
+              <div className="settings-toggle-text">
+                <span className="settings-toggle-label">Background Pattern</span>
+                <span className="settings-toggle-desc">Dots or animated grid — both themes</span>
+              </div>
+              <div className="settings-theme-picker">
+                <button
+                  className={`settings-theme-btn${settings.bgPattern === 'dots' ? ' settings-theme-btn--active' : ''}`}
+                  onClick={() => set('bgPattern')('dots')}
+                >
+                  Dots
+                </button>
+                <button
+                  className={`settings-theme-btn${settings.bgPattern === 'grid' ? ' settings-theme-btn--active' : ''}`}
+                  onClick={() => set('bgPattern')('grid')}
+                >
+                  Grid
+                </button>
+              </div>
+            </div>
           </Section>
 
           {/* ── Dock ── */}
@@ -191,7 +213,7 @@ const Settings: React.FC<SettingsProps> = ({
           <Section title="Background Grid">
             <Slider
               label="Scroll Speed"
-              description="ShapeGrid animation speed"
+              description="ShapeGrid animation speed (grid pattern only)"
               value={settings.gridSpeed}
               min={1}
               max={20}

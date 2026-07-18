@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { useSerialStream } from "./useSerialStream";
 
 const GUITAR_BUF = 1024;
@@ -114,6 +115,10 @@ export default function RustStreamExample() {
   // ── Guitar monitor ─────────────────────────────────────────────────────────
   const [monOn, setMonOn] = useState(false);
   const monRef  = useRef(false);
+
+  // ── Hardware DAC mute ──────────────────────────────────────────────────────
+  const [hwMuted, setHwMuted] = useState(false);
+  const [muteLoading, setMuteLoading] = useState(false);
 
   // ── Mix (0 = guitar only, 1 = backing only) ────────────────────────────────
   const [mix, setMix] = useState(0.5);
@@ -259,8 +264,25 @@ export default function RustStreamExample() {
     cancelAnimationFrame(gAnimRef.current);
     gBufRef.current.fill(0);
     setMonOn(false);
+    if (hwMuted) {
+      invoke<void>("set_output_mute", { muted: false }).catch(() => {});
+      setHwMuted(false);
+    }
     disconnect();
-  }, [disconnect]);
+  }, [disconnect, hwMuted]);
+
+  const toggleHardwareMute = useCallback(async () => {
+    const next = !hwMuted;
+    setMuteLoading(true);
+    try {
+      await invoke<void>("set_output_mute", { muted: next });
+      setHwMuted(next);
+    } catch (e) {
+      console.warn("[RustStreamExample] set_output_mute failed:", e);
+    } finally {
+      setMuteLoading(false);
+    }
+  }, [hwMuted]);
 
   // ── Backing track: file load ───────────────────────────────────────────────
 
@@ -511,6 +533,24 @@ export default function RustStreamExample() {
             }}
           >
             {monOn ? "👂 Monitor: ON" : "👂 Monitor: OFF"}
+          </button>
+          <button
+            onClick={toggleHardwareMute}
+            disabled={muteLoading}
+            title={hwMuted
+              ? "Restore hardware speaker output (ESP32 DAC)"
+              : "Silence the hardware speaker output (ESP32 DAC)"}
+            style={{
+              ...btn,
+              opacity: muteLoading ? 0.5 : 1,
+              borderColor: hwMuted
+                ? "rgba(239,68,68,0.7)"
+                : "rgba(255,255,255,0.22)",
+              color: hwMuted ? "#ef4444" : "rgba(255,255,255,0.5)",
+              background: hwMuted ? "rgba(239,68,68,0.10)" : "transparent",
+            }}
+          >
+            {hwMuted ? "🔇 HW: Muted" : "🔊 HW: Live"}
           </button>
           <button onClick={handleStop} style={btn}>Stop stream</button>
         </div>

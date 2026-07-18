@@ -1,5 +1,4 @@
 import { useRef, useState, useCallback, useEffect } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { useSerialStream } from "./useSerialStream";
 import { useIsLightMode } from "./UseTheme";
 import DashboardMetronome from "./DashboardMetronome";
@@ -131,14 +130,6 @@ export default function DashboardAudio() {
   const prevFreqRef = useRef(0);
   const [note, setNote] = useState("—");
 
-  const [isMonitoring, setIsMonitoring] = useState(false);
-  const isMonitoringRef = useRef(false);
-  const audioCtxRef = useRef<AudioContext | null>(null);
-  const nextStartTimeRef = useRef<number>(0);
-
-  const [isMuted, setIsMuted] = useState(false);
-  const [muteLoading, setMuteLoading] = useState(false);
-
   // ── Carousel ───────────────────────────────────────────────────────────────
   const [page, setPage] = useState(0);
   const [dragX, setDragX] = useState(0);
@@ -148,70 +139,6 @@ export default function DashboardAudio() {
   const pageRef = useRef(0);
 
   useEffect(() => { pageRef.current = page; }, [page]);
-
-  useEffect(() => {
-    isMonitoringRef.current = isMonitoring;
-    if (!isMonitoring) {
-      audioCtxRef.current?.close().catch(() => {});
-      audioCtxRef.current = null;
-      nextStartTimeRef.current = 0;
-    }
-  }, [isMonitoring]);
-
-  useEffect(() => {
-    return () => {
-      audioCtxRef.current?.close().catch(() => {});
-    };
-  }, []);
-
-  const scheduleAudioChunk = useCallback((samples: number[]) => {
-    if (!isMonitoringRef.current) return;
-
-    if (!audioCtxRef.current || audioCtxRef.current.state === "closed") {
-      try {
-        audioCtxRef.current = new AudioContext({ sampleRate: SAMPLE_RATE, latencyHint: "interactive" });
-        nextStartTimeRef.current = 0;
-      } catch {
-        return;
-      }
-    }
-
-    const ctx = audioCtxRef.current;
-    if (ctx.state === "suspended") ctx.resume().catch(() => {});
-
-    const floats = new Float32Array(samples);
-    const buf = ctx.createBuffer(1, floats.length, SAMPLE_RATE);
-    buf.getChannelData(0).set(floats);
-
-    const src = ctx.createBufferSource();
-    src.buffer = buf;
-    src.connect(ctx.destination);
-
-    const now = ctx.currentTime;
-    const LOOKAHEAD = 0.005;
-    const MAX_DRIFT = 0.030;
-
-    if (nextStartTimeRef.current < now || nextStartTimeRef.current > now + MAX_DRIFT) {
-      nextStartTimeRef.current = now + LOOKAHEAD;
-    }
-
-    const startAt = nextStartTimeRef.current;
-    src.start(startAt);
-    nextStartTimeRef.current = startAt + buf.duration;
-  }, []);
-
-  const toggleHardwareMute = useCallback(async () => {
-    const next = !isMuted;
-    setMuteLoading(true);
-    try {
-      await invoke<void>("set_output_mute", { muted: next });
-      setIsMuted(next);
-    } catch (e) {
-      console.warn("[DashboardAudio] set_output_mute failed:", e);
-    } finally {
-      setMuteLoading(false);
-    }
-  }, [isMuted]);
 
   const ingestChunk = useCallback((samples: number[]) => {
     let energy = 0;
@@ -277,12 +204,11 @@ export default function DashboardAudio() {
 
   const onChunk = useCallback((samples: number[]) => {
     ingestChunk(samples);
-    scheduleAudioChunk(samples);
     if (!runningRef.current) {
       runningRef.current = true;
       animRef.current = requestAnimationFrame(draw);
     }
-  }, [ingestChunk, scheduleAudioChunk, draw]);
+  }, [ingestChunk, draw]);
 
   const { ports, selectedPort, setSelectedPort, connected, connect, disconnect, refreshPorts } =
     useSerialStream(onChunk);
@@ -291,11 +217,6 @@ export default function DashboardAudio() {
     runningRef.current = false;
     cancelAnimationFrame(animRef.current);
     bufferRef.current.fill(0);
-    setIsMonitoring(false);
-    if (isMuted) {
-      invoke<void>("set_output_mute", { muted: false }).catch(() => {});
-      setIsMuted(false);
-    }
     disconnect();
   };
 
@@ -375,7 +296,7 @@ export default function DashboardAudio() {
         </div>
       ) : (
         <>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
             <div style={{ width: 10, height: 10, borderRadius: "50%", background: "lime", flexShrink: 0 }} />
             <h4 style={{ margin: 0, fontSize: 13, color: rootColor }}>Connected: {selectedPort}</h4>
             <button
@@ -383,48 +304,6 @@ export default function DashboardAudio() {
               style={{ ...btnBase, fontSize: 11, padding: "2px 8px" }}
             >
               Disconnect
-            </button>
-          </div>
-
-          <div style={{ display: "flex", gap: 6, marginTop: 8, marginBottom: 4 }}>
-            <button
-              onClick={() => setIsMonitoring(v => !v)}
-              title={isMonitoring
-                ? "Stop playing audio through this device"
-                : "Play incoming audio through this device's speakers"}
-              style={{
-                ...btnBase,
-                borderColor: isMonitoring
-                  ? (light ? "rgba(109,40,217,0.55)" : "rgba(175,169,236,0.7)")
-                  : (light ? "rgba(0,0,0,0.22)" : "rgba(255,255,255,0.25)"),
-                color: isMonitoring
-                  ? accent
-                  : (light ? "rgba(26,15,46,0.55)" : "rgba(255,255,255,0.55)"),
-                background: isMonitoring
-                  ? (light ? "rgba(109,40,217,0.1)" : "rgba(175,169,236,0.12)")
-                  : "transparent",
-              }}
-            >
-              {isMonitoring ? "Monitor: ON" : "Monitor: OFF"}
-            </button>
-
-            <button
-              onClick={toggleHardwareMute}
-              disabled={muteLoading}
-              title={isMuted
-                ? "Restore hardware speaker output"
-                : "Silence the hardware speaker output (ESP32 DAC)"}
-              style={{
-                ...btnBase,
-                opacity: muteLoading ? 0.5 : 1,
-                borderColor: isMuted
-                  ? "rgba(239,68,68,0.7)"
-                  : (light ? "rgba(0,0,0,0.22)" : "rgba(255,255,255,0.25)"),
-                color: isMuted ? "#ef4444" : (light ? "rgba(26,15,46,0.55)" : "rgba(255,255,255,0.55)"),
-                background: isMuted ? "rgba(239,68,68,0.10)" : "transparent",
-              }}
-            >
-              {isMuted ? "HW: Muted" : "HW: Live"}
             </button>
           </div>
         </>

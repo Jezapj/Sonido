@@ -140,6 +140,13 @@ const LooperOverlay: FC<LooperOverlayProps> = ({ item, onClose }) => {
     catch { /* ignore */ } finally { setBusy(false); }
   }, [busy]);
 
+  const play = useCallback(async () => {
+    if (busy) return;
+    setBusy(true);
+    try { const i = await invoke<LooperInfo>('looper_play'); setInfo(i); }
+    catch { /* ignore */ } finally { setBusy(false); }
+  }, [busy]);
+
   const clear = useCallback(async () => {
     if (busy) return;
     setBusy(true);
@@ -187,8 +194,9 @@ const LooperOverlay: FC<LooperOverlayProps> = ({ item, onClose }) => {
     info.state === 'Playing'     ? '#a855f7' :
     'rgba(255,255,255,0.75)';
 
-  const stopDisabled  = info.state === 'Idle' || info.state === 'Stopped';
+  const stopDisabled  = info.state === 'Idle';
   const clearDisabled = info.state === 'Idle';
+  const isStopped     = info.state === 'Stopped';
   const loopingActive = info.state === 'Playing' || info.state === 'Overdubbing';
 
   // ── Colour tokens ─────────────────────────────────────────────────────────
@@ -346,13 +354,21 @@ const LooperOverlay: FC<LooperOverlayProps> = ({ item, onClose }) => {
                   }}
                 >{TAP_LABEL[info.state]}</button>
 
-                {/* STOP + CLEAR */}
+                {/* STOP / PLAY + CLEAR */}
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <Btn
-                    onClick={stop} disabled={stopDisabled}
-                    color={stopDisabled ? undefined : 'rgba(239,68,68,0.6)'}
-                    border={stopDisabled ? undefined : 'rgba(239,68,68,0.5)'}
-                  >⏹ STOP</Btn>
+                  {isStopped ? (
+                    <Btn
+                      onClick={play}
+                      color="rgba(34,197,94,0.65)"
+                      border="rgba(34,197,94,0.55)"
+                    >▶ PLAY</Btn>
+                  ) : (
+                    <Btn
+                      onClick={stop} disabled={stopDisabled}
+                      color={stopDisabled ? undefined : 'rgba(239,68,68,0.6)'}
+                      border={stopDisabled ? undefined : 'rgba(239,68,68,0.5)'}
+                    >⏹ STOP</Btn>
+                  )}
                   <Btn
                     onClick={clear} disabled={clearDisabled}
                     color={clearDisabled ? undefined : 'rgba(100,100,100,0.5)'}
@@ -418,7 +434,7 @@ const LooperOverlay: FC<LooperOverlayProps> = ({ item, onClose }) => {
 
           {/* ── Hint ──────────────────────────────────────────────────────── */}
           <div className="po-hint" style={{ color: c.hint }}>
-            While playing, monitor defaults to loop only · CLEAR restores live monitor
+            Space rec/stop/play · Shift clear · TAP overdubs while playing
           </div>
         </div>
       </div>

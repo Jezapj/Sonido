@@ -142,6 +142,7 @@ function App() {
 
   // ── gridSpeed slider (1–20) → ShapeGrid speed (0.1–2.0) ──────────────────
   const shapeGridSpeed = settings.gridSpeed / 10;
+  const useDots = settings.bgPattern === 'dots';
 
   // ── Shared floating-lines background ─────────────────────────────────────
   const floatingLinesBg = (
@@ -166,38 +167,50 @@ function App() {
     <>
       {/* ── Global background ── */}
       <div style={{ position: 'absolute', width: '100%', height: '100%', zIndex: -1 }}>
-        <div style={{
-          position: 'absolute', width: '100%', height: '100%',
-          opacity: 1,
-          transition: 'opacity 0.6s ease-in-out', pointerEvents: 'none',
-        }}>
-          {theme === "dark"
-            ? floatingLinesBg
-            : (
-              <div
-                className="bg-dots"
-                style={{ width: '100%', height: '100%' }}
-                aria-hidden
-              />
+        {useDots ? (
+          <>
+            {/* Dark mode: floating lines under a translucent dots wash */}
+            {theme === 'dark' && (
+              <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+                {floatingLinesBg}
+              </div>
             )}
-        </div>
-        {theme === "dark" && (
-          <div style={{
-            position: 'absolute', width: '100%', height: '100%',
-            opacity: bgVariant === 1 ? 1 : 0.3,
-            transition: 'opacity 0.6s ease-in-out', pointerEvents: 'none',
-          }}>
-            <ShapeGrid
-              speed={shapeGridSpeed}
-              squareSize={40}
-              direction="diagonal"
-              borderColor="rgba(255,255,255,0.3)"
-              hoverFillColor="#222"
-              shape="square"
-              hoverTrailAmount={0}
+            <div
+              className={`bg-dots ${theme === 'light' ? 'bg-dots--light' : 'bg-dots--dark'}`}
+              style={{ width: '100%', height: '100%' }}
+              aria-hidden
             />
-            {floatingLinesBg}
-          </div>
+          </>
+        ) : (
+          <>
+            {/* Base wash under the grid */}
+            <div style={{
+              position: 'absolute', inset: 0,
+              background: theme === 'light' ? '#e8eaef' : undefined,
+              pointerEvents: 'none',
+            }}>
+              {theme === 'dark' && floatingLinesBg}
+            </div>
+            <div style={{
+              position: 'absolute', inset: 0,
+              opacity: theme === 'dark' ? (bgVariant === 1 ? 1 : 0.35) : 1,
+              transition: 'opacity 0.6s ease-in-out',
+              pointerEvents: 'none',
+            }}>
+              <ShapeGrid
+                speed={shapeGridSpeed}
+                squareSize={40}
+                direction="diagonal"
+                borderColor={theme === 'light'
+                  ? 'rgba(80, 85, 100, 0.35)'
+                  : 'rgba(255,255,255,0.3)'}
+                hoverFillColor={theme === 'light' ? 'rgba(0,0,0,0.06)' : '#222'}
+                shape="square"
+                hoverTrailAmount={0}
+              />
+              {theme === 'dark' && floatingLinesBg}
+            </div>
+          </>
         )}
       </div>
 

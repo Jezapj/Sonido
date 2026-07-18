@@ -1,5 +1,6 @@
 import { Camera, Mesh, Plane, Program, Renderer, Texture, Transform } from 'ogl';
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import PedalOverlay from './PedalOverlay';
 import LooperOverlay from './LooperOverlay';
 import type { PedalState } from './PedalOverlay';
@@ -326,9 +327,11 @@ class App {
 
   onTouchDown(e: MouseEvent | TouchEvent) {
     if (!this.interactionEnabled) return;
-    this.isDown = true; this.scroll.position = this.scroll.current;
     const cx = 'touches' in e ? e.touches[0].clientX : e.clientX;
     const cy = 'touches' in e ? e.touches[0].clientY : e.clientY;
+    // Only start a drag when the pointer is over this gallery
+    if (!this.isOverContainer(cx, cy)) return;
+    this.isDown = true; this.scroll.position = this.scroll.current;
     this.start = cx; this.startX = cx; this.startY = cy; this.lastX = cx;
   }
 
@@ -350,9 +353,20 @@ class App {
     this.onCheck();
   }
 
+  /** True when the pointer is inside this gallery's container bounds. */
+  private isOverContainer(clientX: number, clientY: number): boolean {
+    const rect = this.container.getBoundingClientRect();
+    return (
+      clientX >= rect.left && clientX <= rect.right &&
+      clientY >= rect.top  && clientY <= rect.bottom
+    );
+  }
+
   onWheel(e: Event) {
     if (!this.interactionEnabled) return;
-    const ev    = e as WheelEvent;
+    const ev = e as WheelEvent;
+    // Ignore wheel events that originate outside this gallery (e.g. dashboard / presets)
+    if (!this.isOverContainer(ev.clientX, ev.clientY)) return;
     const delta = ev.deltaY || (ev as any).wheelDelta || (ev as any).detail;
     this.scroll.target += (delta > 0 ? this.scrollSpeed : -this.scrollSpeed) * 0.2;
     this.onCheckDebounce();
@@ -408,22 +422,26 @@ class App {
     this.boundOnTouchDown = this.onTouchDown.bind(this);
     this.boundOnTouchMove = this.onTouchMove.bind(this);
     this.boundOnTouchUp   = this.onTouchUp.bind(this);
-    window.addEventListener('resize',     this.boundOnResize);
-    window.addEventListener('mousewheel', this.boundOnWheel);
-    window.addEventListener('wheel',      this.boundOnWheel);
+    window.addEventListener('resize', this.boundOnResize);
+    // Wheel is scoped to the gallery container so scrolling other bento cards
+    // (dashboard carousel, presets) does not move the DSP gallery.
+    this.container.addEventListener('wheel', this.boundOnWheel, { passive: true });
+    this.container.addEventListener('mousewheel', this.boundOnWheel as EventListener, { passive: true } as AddEventListenerOptions);
+    // Pointer down only matters when over the gallery (gated in onTouchDown);
+    // move/up stay on window so an in-progress drag can finish outside the card.
     window.addEventListener('mousedown',  this.boundOnTouchDown);
     window.addEventListener('mousemove',  this.boundOnTouchMove);
     window.addEventListener('mouseup',    this.boundOnTouchUp);
-    window.addEventListener('touchstart', this.boundOnTouchDown);
-    window.addEventListener('touchmove',  this.boundOnTouchMove);
+    window.addEventListener('touchstart', this.boundOnTouchDown, { passive: true });
+    window.addEventListener('touchmove',  this.boundOnTouchMove, { passive: true });
     window.addEventListener('touchend',   this.boundOnTouchUp);
   }
 
   destroy() {
     window.cancelAnimationFrame(this.raf);
-    window.removeEventListener('resize',     this.boundOnResize);
-    window.removeEventListener('mousewheel', this.boundOnWheel);
-    window.removeEventListener('wheel',      this.boundOnWheel);
+    window.removeEventListener('resize', this.boundOnResize);
+    this.container.removeEventListener('wheel', this.boundOnWheel);
+    this.container.removeEventListener('mousewheel', this.boundOnWheel as EventListener);
     window.removeEventListener('mousedown',  this.boundOnTouchDown);
     window.removeEventListener('mousemove',  this.boundOnTouchMove);
     window.removeEventListener('mouseup',    this.boundOnTouchUp);
@@ -518,6 +536,71 @@ export default function CircularGallery({
   useEffect(() => {
     appRef.current?.setInteractionEnabled(clickedItem === null);
   }, [clickedItem]);
+
+  // ── Global looper shortcuts (Space = transport, Shift = clear) ────────────
+  // Enter is reserved for preset apply in PresetsCard.
+  useEffect(() => {
+    let shiftSolo = false;
+    let busy = false;
+
+    const isTypingTarget = (t: EventTarget | null) => {
+      if (!(t instanceof HTMLElement)) return false;
+      const tag = t.tagName;
+      return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t.isContentEditable;
+    };
+
+    const run = async (fn: () => Promise<unknown>) => {
+      if (busy) return;
+      busy = true;
+      try { await fn(); } catch { /* ignore */ } finally { busy = false; }
+    };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (isTypingTarget(e.target)) return;
+      if (e.repeat) return;
+
+      if (e.key === 'Shift') {
+        shiftSolo = true;
+        return;
+      }
+      // Any other key while Shift is held cancels solo-Shift clear
+      if (e.shiftKey) shiftSolo = false;
+
+      if (e.key === ' ' || e.code === 'Space') {
+        e.preventDefault();
+        void run(async () => {
+          const info = await invoke<{ state: string }>('get_looper_info');
+          const state = info.state;
+          if (state === 'Idle' || state === 'Recording') {
+            await invoke('looper_tap');
+          } else if (state === 'Playing' || state === 'Overdubbing') {
+            await invoke('looper_stop');
+          } else if (state === 'Stopped') {
+            await invoke('looper_play');
+          }
+        });
+      }
+    };
+
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key !== 'Shift') return;
+      if (isTypingTarget(e.target)) { shiftSolo = false; return; }
+      if (shiftSolo) {
+        shiftSolo = false;
+        e.preventDefault();
+        void run(async () => { await invoke('looper_clear'); });
+        return;
+      }
+      shiftSolo = false;
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+    };
+  }, []);
 
   // ── Determine which overlay to render ─────────────────────────────────────
   const isLooperItem = clickedItem !== null && LOOPER_ITEMS.has(clickedItem.text);

@@ -6,6 +6,8 @@ use tauri::Manager;
 use tauri::Window;
 
 const LOOPER_SAMPLE_RATE: f32 = 47991.0;
+/// Host capture / monitor latency compensation when blending live into the loop.
+const OVERDUB_LATENCY_SECS: f32 = 0.27;
 
 // ── Looper state machine ──────────────────────────────────────────────────────
 
@@ -127,14 +129,19 @@ fn peek_loop_chunk(lb: &LoopBuffer, len: usize) -> Vec<f32> {
 }
 
 /// Blend `live` into the loop buffer (feedback decay) and advance play_pos.
+/// Live samples are written `OVERDUB_LATENCY_SECS` earlier in the loop so the
+/// overdub aligns with playback despite host capture/monitor latency.
 fn overdub_and_advance(lb: &mut LoopBuffer, live: &[i16]) {
     if lb.loop_len == 0 {
         return;
     }
+    let latency = ((OVERDUB_LATENCY_SECS * LOOPER_SAMPLE_RATE) as usize) % lb.loop_len;
     let len = live.len().min(lb.loop_len);
     for i in 0..len {
-        let blended = lb.samples[lb.play_pos] as f32 * lb.feedback + live[i] as f32;
-        lb.samples[lb.play_pos] = blended.clamp(-32768.0, 32767.0) as i16;
+        // play_pos - latency (wrapped): place the overdub earlier in the loop
+        let write_pos = (lb.play_pos + lb.loop_len - latency) % lb.loop_len;
+        let blended = lb.samples[write_pos] as f32 * lb.feedback + live[i] as f32;
+        lb.samples[write_pos] = blended.clamp(-32768.0, 32767.0) as i16;
         lb.play_pos = (lb.play_pos + 1) % lb.loop_len;
     }
 }
@@ -252,6 +259,22 @@ async fn looper_stop(app: tauri::AppHandle) -> Result<LooperInfo, String> {
                 lb.state    = LooperState::Stopped;
             }
             _ => {}
+        }
+        info = snapshot(&lb);
+    }
+    let _ = app.emit("looper_info", info.clone());
+    Ok(info)
+}
+
+/// Resume playback from Stopped without clearing the loop buffer.
+#[tauri::command]
+async fn looper_play(app: tauri::AppHandle) -> Result<LooperInfo, String> {
+    let info;
+    {
+        let state = app.state::<LoopState>();
+        let mut lb = state.0.lock().map_err(|e| e.to_string())?;
+        if lb.state == LooperState::Stopped && lb.loop_len > 0 {
+            lb.state = LooperState::Playing;
         }
         info = snapshot(&lb);
     }
@@ -457,7 +480,8 @@ async fn update_dsp_params(
         g.insert(pedal_id, (enabled, params.clone()));
     }
     let mut send_params = params.clone();
-    if pedal_id == 0 {
+    // Pedal 1 = EQ + Pre-Gain ("Blurry Lights") — hardware mute gates pre_gain only.
+    if pedal_id == 1 {
         let ms = app.state::<MuteState>();
         if *ms.is_muted.lock().map_err(|e| e.to_string())? && !send_params.is_empty() {
             *ms.saved_pregain.lock().map_err(|e| e.to_string())? = send_params[0];
@@ -467,32 +491,54 @@ async fn update_dsp_params(
     write_packet(&app, &build_param_packet(pedal_id, enabled, &send_params))
 }
 
+/// Silence / restore the ESP32 DAC path by zeroing EQ pre_gain (pedal id 1).
+/// Must NOT target pedal 0 — that is the Octave pedal; writing EQ-shaped
+/// params there leaves a permanent pitch-shifted "overtone" until reset.
 #[tauri::command]
 async fn set_output_mute(app: tauri::AppHandle, muted: bool) -> Result<(), String> {
+    const EQ_PEDAL_ID: u8 = 1;
+    const OCTAVE_PEDAL_ID: u8 = 0;
     let store = app.state::<LastParamsStore>();
     let ms    = app.state::<MuteState>();
 
     let (enabled, mut params) = {
         let g = store.0.lock().map_err(|e| e.to_string())?;
-        g.get(&0).cloned().unwrap_or_else(|| (
+        g.get(&EQ_PEDAL_ID).cloned().unwrap_or_else(|| (
             true,
-            vec![1.0, 0.0, 0.0, -2.0, 80.0, 800.0, 6000.0, 1.0, 1.0, 1.0, 0.95],
+            // Defaults match PedalOverlay "Blurry Lights"
+            vec![1.0, 0.0, 0.0, 0.0, 80.0, 800.0, 6000.0, 1.0, 1.0, 1.0, 0.95],
         ))
     };
 
     if muted {
         if !params.is_empty() {
-            *ms.saved_pregain.lock().map_err(|e| e.to_string())? = params[0];
+            let current = params[0];
+            if current > 0.0 {
+                *ms.saved_pregain.lock().map_err(|e| e.to_string())? = current;
+            }
             params[0] = 0.0;
         }
         *ms.is_muted.lock().map_err(|e| e.to_string())? = true;
     } else {
         let saved = *ms.saved_pregain.lock().map_err(|e| e.to_string())?;
-        if !params.is_empty() { params[0] = if saved > 0.0 { saved } else { 1.0 }; }
+        if !params.is_empty() {
+            params[0] = if saved > 0.0 { saved } else { 1.0 };
+        }
         *ms.is_muted.lock().map_err(|e| e.to_string())? = false;
+
+        // Heal devices corrupted by the old mute bug (EQ params → octave slot).
+        // Re-push a valid octave packet: stored 3-param state if present, else dry bypass.
+        let (oct_en, oct_params) = {
+            let g = store.0.lock().map_err(|e| e.to_string())?;
+            match g.get(&OCTAVE_PEDAL_ID).cloned() {
+                Some((en, p)) if p.len() == 3 => (en, p),
+                _ => (false, vec![0.0, 0.0, 1.0]), // shift=0, mix=0, level=1
+            }
+        };
+        let _ = write_packet(&app, &build_param_packet(OCTAVE_PEDAL_ID, oct_en, &oct_params));
     }
 
-    write_packet(&app, &build_param_packet(0, enabled, &params))
+    write_packet(&app, &build_param_packet(EQ_PEDAL_ID, enabled, &params))
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -520,6 +566,7 @@ pub fn run() {
             toggle_fullscreen,
             looper_tap,
             looper_stop,
+            looper_play,
             looper_clear,
             set_looper_params,
             set_looper_monitor_live,

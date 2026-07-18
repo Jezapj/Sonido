@@ -108,20 +108,27 @@ button {
   margin-right: 5px;
 }
 
-/* Soft dotted paper background — light mode only */
+/* Soft dotted background — light opaque; dark translucent over FloatingLines */
 .bg-dots {
   position: absolute;
   inset: 0;
-  background-color: rgb(var(--surface-body));
+  pointer-events: none;
+}
+
+.bg-dots--light {
+  background-color: #f4f2f0;
   background-image:
-    radial-gradient(circle, rgba(150, 158, 172, 0.19) 1px, transparent 1.4px),
-    radial-gradient(125% 115% at 50% 35%, #fbfbfc 0%, #f0f1f4 48%, #dfe2e8 78%, #d2d5dc 100%);
-  background-size:
-    13px 13px,
-    100% 100%;
-  background-position:
-    0 0,
-    0 0;
+    radial-gradient(circle, rgba(90, 90, 100, 0.28) 1px, transparent 1.2px);
+  background-size: 22px 22px;
+  background-position: 0 0;
+}
+
+.bg-dots--dark {
+  background-color: rgba(7, 7, 12, 0.42);
+  background-image:
+    radial-gradient(circle, rgba(255, 255, 255, 0.05) 1px, transparent 1.4px);
+  background-size: 15px 15px;
+  background-position: 0 0;
 }
 
 [data-theme="light"] :root,

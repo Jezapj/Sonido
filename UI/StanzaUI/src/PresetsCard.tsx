@@ -117,7 +117,6 @@ const PresetsCard: React.FC<PresetsCardProps> = ({ pedalStates, onLoad, onPreset
           break;
 
         case 'Enter':
-        case ' ':
           e.preventDefault();
           if (focusedIndex !== null && bank[focusedIndex]) {
             handleApply(bank[focusedIndex]);
@@ -483,7 +482,7 @@ const PresetsCard: React.FC<PresetsCardProps> = ({ pedalStates, onLoad, onPreset
           marginBottom:  4,
           flexShrink:    0,
         }}>
-          W / S  ·  ↑↓ navigate  ·  Enter / Space  apply
+          W / S  ·  ↑↓ navigate  ·  Enter apply
         </div>
       )}
 
