@@ -255,21 +255,27 @@ export default function RustStreamExample() {
   // ── Serial stream controls ─────────────────────────────────────────────────
 
   const {
-    ports, selectedPort, setSelectedPort,
-    connected, connect, disconnect, refreshPorts,
+    connected,
   } = useSerialStream(onChunk);
 
-  const handleStop = useCallback(() => {
+  const handleLocalReset = useCallback(() => {
     liveRef.current = false;
     cancelAnimationFrame(gAnimRef.current);
     gBufRef.current.fill(0);
     setMonOn(false);
+    setChunks(0);
+    setChunkSz(null);
+    setPeak(null);
     if (hwMuted) {
       invoke<void>("set_output_mute", { muted: false }).catch(() => {});
       setHwMuted(false);
     }
-    disconnect();
-  }, [disconnect, hwMuted]);
+  }, [hwMuted]);
+
+  // When dashboard disconnects, reset local waveform state
+  useEffect(() => {
+    if (!connected) handleLocalReset();
+  }, [connected, handleLocalReset]);
 
   const toggleHardwareMute = useCallback(async () => {
     const next = !hwMuted;
@@ -472,89 +478,58 @@ export default function RustStreamExample() {
   return (
     <div style={{ fontFamily: "monospace", padding: "0.6rem 0.2rem " }}>
 
-      {/* ── Status badge ──────────────────────────────────────────────────── */}
-      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 5 }}>
-        
+      {/* ── Status badge + monitor controls ──────────────────────────────── */}
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 5, alignItems: "center", gap: 8 }}>
         <span style={{
-          fontSize: 11, marginRight: "10px", padding: "1px 10px", borderRadius: 99,
+          fontSize: 11, padding: "1px 10px", borderRadius: 99,
           background: connected ? "rgba(83,74,183,0.25)" : "rgba(255,255,255,0.08)",
           color: connected ? "#AFA9EC" : "rgba(255,255,255,0.4)",
           display: "flex", alignItems: "center", gap: 5,
         }}>
-          
           <span style={{
             width: 6, height: 6, borderRadius: "50%",
             background: "currentColor",
             animation: connected ? "rse-pulse 1.1s infinite" : "none",
           }} />
-          {connected ? "live" : "idle"}
-          
+          {connected ? "live" : "idle · connect in Dashboard"}
         </span>
-        {/* ── Connect / disconnect controls ──────────────────────────────────── */}
-      {!connected ? (
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <select
-            value={selectedPort}
-            onChange={e => setSelectedPort(e.target.value)}
-            style={{
-              background: "#1a1a2e", color: "#fff",
-              border: "0.5px solid rgba(255,255,255,0.22)",
-              borderRadius: 8, padding: "6px 10px",
-              fontSize: 12, fontFamily: "monospace",
-            }}
-          >
-            {ports.length === 0
-              ? <option value="">No ports found</option>
-              : ports.map(p => <option key={p} value={p}>{p}</option>)}
-          </select>
-          <button onClick={refreshPorts} title="Refresh ports" style={btn}>↺</button>
-          <button
-            onClick={connect}
-            disabled={!selectedPort}
-            style={{ ...btn, opacity: selectedPort ? 1 : 0.4 }}
-          >
-            Start stream
-          </button>
-        </div>
-      ) : (
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <button
-            onClick={() => setMonOn(v => !v)}
-            title={monOn
-              ? "Stop playing audio through this device's speakers"
-              : "Play both guitar + backing through this device's speakers"}
-            style={{
-              ...btn,
-              borderColor: monOn
-                ? "rgba(175,169,236,0.65)"
-                : "rgba(255,255,255,0.22)",
-              color: monOn ? "#AFA9EC" : "rgba(255,255,255,0.5)",
-              background: monOn ? "rgba(175,169,236,0.12)" : "transparent",
-            }}
-          >
-            {monOn ? "👂 Monitor: ON" : "👂 Monitor: OFF"}
-          </button>
-          <button
-            onClick={toggleHardwareMute}
-            disabled={muteLoading}
-            title={hwMuted
-              ? "Restore hardware speaker output (ESP32 DAC)"
-              : "Silence the hardware speaker output (ESP32 DAC)"}
-            style={{
-              ...btn,
-              opacity: muteLoading ? 0.5 : 1,
-              borderColor: hwMuted
-                ? "rgba(239,68,68,0.7)"
-                : "rgba(255,255,255,0.22)",
-              color: hwMuted ? "#ef4444" : "rgba(255,255,255,0.5)",
-              background: hwMuted ? "rgba(239,68,68,0.10)" : "transparent",
-            }}
-          >
-            {hwMuted ? "🔇 HW: Muted" : "🔊 HW: Live"}
-          </button>
-          <button onClick={handleStop} style={btn}>Stop stream</button>
-        </div>
-      )}
+
+        <button
+          onClick={() => setMonOn(v => !v)}
+          disabled={!connected}
+          title={monOn
+            ? "Stop playing audio through this device's speakers"
+            : "Play both guitar + backing through this device's speakers"}
+          style={{
+            ...btn,
+            opacity: connected ? 1 : 0.4,
+            borderColor: monOn
+              ? "rgba(175,169,236,0.65)"
+              : "rgba(255,255,255,0.22)",
+            color: monOn ? "#AFA9EC" : "rgba(255,255,255,0.5)",
+            background: monOn ? "rgba(175,169,236,0.12)" : "transparent",
+          }}
+        >
+          {monOn ? "👂 Monitor: ON" : "👂 Monitor: OFF"}
+        </button>
+        <button
+          onClick={toggleHardwareMute}
+          disabled={!connected || muteLoading}
+          title={hwMuted
+            ? "Restore hardware speaker output (ESP32 DAC)"
+            : "Silence the hardware speaker output (ESP32 DAC)"}
+          style={{
+            ...btn,
+            opacity: (!connected || muteLoading) ? 0.5 : 1,
+            borderColor: hwMuted
+              ? "rgba(239,68,68,0.7)"
+              : "rgba(255,255,255,0.22)",
+            color: hwMuted ? "#ef4444" : "rgba(255,255,255,0.5)",
+            background: hwMuted ? "rgba(239,68,68,0.10)" : "transparent",
+          }}
+        >
+          {hwMuted ? "🔇 HW: Muted" : "🔊 HW: Live"}
+        </button>
       </div>
 
       {/* ── Guitar waveform canvas ─────────────────────────────────────────── */}

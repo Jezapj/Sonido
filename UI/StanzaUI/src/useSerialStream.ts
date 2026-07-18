@@ -1,14 +1,10 @@
 /**
  * useSerialStream
  *
- * Manages a single shared serial connection shared across all consumers.
- * Multiple components can call `connect()` safely — only the first call
- * opens the port (stream_audio_serial is idempotent on the Rust side).
- * All components listen to the same global `audio_chunk` event bus.
- *
- * Usage:
- *   const { ports, selectedPort, setSelectedPort, connected,
- *           connect, disconnect, refreshPorts } = useSerialStream(onChunk);
+ * Single shared serial connection for the whole app.
+ * Connect / disconnect from DashboardAudio; every consumer that calls
+ * useSerialStream() sees the same `connected` / `selectedPort` state and
+ * receives the same `audio_chunk` events.
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -27,68 +23,142 @@ export interface SerialStreamControls {
   refreshPorts: () => Promise<void>;
 }
 
+// ── Shared module state ───────────────────────────────────────────────────────
+
+type ChunkHandler = (samples: number[]) => void;
+
+let sharedPorts: string[] = [];
+let sharedSelectedPort = '';
+let sharedConnected = false;
+let chunkUnlisten: UnlistenFn | null = null;
+let connecting: Promise<void> | null = null;
+
+const stateListeners = new Set<() => void>();
+const chunkHandlers = new Set<ChunkHandler>();
+
+function notifyState() {
+  stateListeners.forEach(fn => fn());
+}
+
+function fanOutChunk(samples: number[]) {
+  chunkHandlers.forEach(fn => fn(samples));
+}
+
+async function ensureChunkListener() {
+  if (chunkUnlisten) return;
+  chunkUnlisten = await listen<number[]>('audio_chunk', (event) => {
+    fanOutChunk(event.payload);
+  });
+}
+
+async function sharedRefreshPorts() {
+  try {
+    const list = await invoke<string[]>('list_serial_ports');
+    sharedPorts = list;
+    if (sharedSelectedPort === '' && list.length > 0) {
+      sharedSelectedPort = list[0];
+    }
+    notifyState();
+  } catch (e) {
+    console.warn('[useSerialStream] list_serial_ports failed:', e);
+  }
+}
+
+async function sharedConnect() {
+  if (!sharedSelectedPort) return;
+  if (sharedConnected) {
+    await ensureChunkListener();
+    return;
+  }
+  if (connecting) {
+    await connecting;
+    return;
+  }
+
+  connecting = (async () => {
+    await ensureChunkListener();
+    await invoke('stream_audio_serial', {
+      portName: sharedSelectedPort,
+      baudRate: BAUD_RATE,
+    });
+    sharedConnected = true;
+    notifyState();
+  })();
+
+  try {
+    await connecting;
+  } finally {
+    connecting = null;
+  }
+}
+
+function sharedDisconnect() {
+  chunkUnlisten?.();
+  chunkUnlisten = null;
+  sharedConnected = false;
+  notifyState();
+  // Rust stream task may keep running; reconnect is idempotent.
+}
+
+function sharedSetSelectedPort(p: string) {
+  sharedSelectedPort = p;
+  notifyState();
+}
+
+// ── Hook ──────────────────────────────────────────────────────────────────────
+
 export function useSerialStream(
   onChunk: (samples: number[]) => void,
 ): SerialStreamControls {
-  const [ports, setPorts] = useState<string[]>([]);
-  const [selectedPort, setSelectedPort] = useState('');
-  const [connected, setConnected] = useState(false);
-
-  const unlistenRef = useRef<UnlistenFn | null>(null);
-
-  // Keep a stable ref to the callback so the listener never needs
-  // to be re-registered when the parent component re-renders.
+  const [, bump] = useState(0);
   const onChunkRef = useRef(onChunk);
   onChunkRef.current = onChunk;
 
-  const refreshPorts = useCallback(async () => {
-    try {
-      const list = await invoke<string[]>('list_serial_ports');
-      setPorts(list);
-      // Auto-select first port if nothing is selected yet.
-      setSelectedPort(prev => (prev === '' && list.length > 0 ? list[0] : prev));
-    } catch (e) {
-      console.warn('[useSerialStream] list_serial_ports failed:', e);
+  // Sync local render with shared state + register chunk handler
+  useEffect(() => {
+    const onState = () => bump(n => n + 1);
+    stateListeners.add(onState);
+
+    const handler: ChunkHandler = (samples) => onChunkRef.current(samples);
+    chunkHandlers.add(handler);
+
+    // If already connected when this consumer mounts, attach to the event bus
+    if (sharedConnected) {
+      void ensureChunkListener();
     }
+
+    return () => {
+      stateListeners.delete(onState);
+      chunkHandlers.delete(handler);
+    };
   }, []);
 
-  // Discover ports on mount.
-  useEffect(() => { refreshPorts(); }, [refreshPorts]);
+  // Discover ports once (safe to call from every mount)
+  useEffect(() => {
+    void sharedRefreshPorts();
+  }, []);
+
+  const refreshPorts = useCallback(async () => {
+    await sharedRefreshPorts();
+  }, []);
 
   const connect = useCallback(async () => {
-    if (!selectedPort) return;
-
-    // Subscribe to audio events first so we don't miss the first chunk.
-    unlistenRef.current?.();
-    unlistenRef.current = await listen<number[]>('audio_chunk', (event) => {
-      onChunkRef.current(event.payload);
-    });
-
-    // stream_audio_serial is idempotent — safe to call from multiple components.
-    await invoke('stream_audio_serial', {
-      portName: selectedPort,
-      baudRate: BAUD_RATE,
-    });
-
-    setConnected(true);
-  }, [selectedPort]);
-
-  const disconnect = useCallback(() => {
-    unlistenRef.current?.();
-    unlistenRef.current = null;
-    setConnected(false);
-    // Note: the Rust task keeps running so other components still receive events.
-    // A future `stop_serial_stream` command can be added when needed.
+    await sharedConnect();
   }, []);
 
-  // Unlisten on unmount.
-  useEffect(() => () => { unlistenRef.current?.(); }, []);
+  const disconnect = useCallback(() => {
+    sharedDisconnect();
+  }, []);
+
+  const setSelectedPort = useCallback((p: string) => {
+    sharedSetSelectedPort(p);
+  }, []);
 
   return {
-    ports,
-    selectedPort,
+    ports: sharedPorts,
+    selectedPort: sharedSelectedPort,
     setSelectedPort,
-    connected,
+    connected: sharedConnected,
     connect,
     disconnect,
     refreshPorts,
