@@ -684,7 +684,7 @@ export default function RustStreamExample() {
                 justifyContent: "space-between", marginBottom: 1,
               }}>
                 <span style={{ fontSize: 9, color: "rgba(175,169,236,0.6)", letterSpacing: "0.08em" }}>
-                  GUITAR
+                  BACKING
                 </span>
                 <span style={{
                   fontSize: 10, color: "rgba(255,255,255,0.25)",
@@ -696,7 +696,7 @@ export default function RustStreamExample() {
                   </span>
                 </span>
                 <span style={{ fontSize: 9, color: "rgba(99,102,241,0.65)", letterSpacing: "0.08em" }}>
-                  BACKING
+                  GUITAR
                 </span>
               </div>
               <input

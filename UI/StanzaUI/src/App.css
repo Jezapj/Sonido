@@ -118,8 +118,8 @@ button {
 .bg-dots--light {
   background-color: #f4f2f0;
   background-image:
-    radial-gradient(circle, rgba(90, 90, 100, 0.28) 1px, transparent 1.2px);
-  background-size: 22px 22px;
+    radial-gradient(circle, rgba(150, 158, 172, 0.26) 1px, transparent 1.4px);
+  background-size: 18px 18px;
   background-position: 0 0;
 }
 

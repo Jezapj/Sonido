@@ -537,7 +537,10 @@ export default function CircularGallery({
     appRef.current?.setInteractionEnabled(clickedItem === null);
   }, [clickedItem]);
 
-  // ── Global looper shortcuts (Space = transport, Shift = clear) ────────────
+  // ── Global looper shortcuts
+  //   Space: Idle → record → finish+play → overdub → finish overdub (same as TAP; never needs Ctrl)
+  //   Ctrl:  play/stop toggle once a loop exists (Stopped ↔ Playing/Overdubbing)
+  //   Shift (release alone): clear
   // Enter is reserved for preset apply in PresetsCard.
   useEffect(() => {
     let shiftSolo = false;
@@ -566,18 +569,27 @@ export default function CircularGallery({
       // Any other key while Shift is held cancels solo-Shift clear
       if (e.shiftKey) shiftSolo = false;
 
-      if (e.key === ' ' || e.code === 'Space') {
+      if (e.key === 'Control') {
         e.preventDefault();
         void run(async () => {
           const info = await invoke<{ state: string }>('get_looper_info');
           const state = info.state;
-          if (state === 'Idle' || state === 'Recording') {
-            await invoke('looper_tap');
+          if (state === 'Stopped') {
+            await invoke('looper_play');
           } else if (state === 'Playing' || state === 'Overdubbing') {
             await invoke('looper_stop');
-          } else if (state === 'Stopped') {
-            await invoke('looper_play');
           }
+        });
+        return;
+      }
+
+      if (e.key === ' ' || e.code === 'Space') {
+        e.preventDefault();
+        void run(async () => {
+          const info = await invoke<{ state: string }>('get_looper_info');
+          // Stopped: Space does nothing (Ctrl resumes play). looper_tap would wipe the loop.
+          if (info.state === 'Stopped') return;
+          await invoke('looper_tap');
         });
       }
     };

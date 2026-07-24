@@ -434,7 +434,7 @@ const LooperOverlay: FC<LooperOverlayProps> = ({ item, onClose }) => {
 
           {/* ── Hint ──────────────────────────────────────────────────────── */}
           <div className="po-hint" style={{ color: c.hint }}>
-            Space rec/stop/play · Shift clear · TAP overdubs while playing
+            Space: record → play → overdub → play · Ctrl play/stop · Shift clear
           </div>
         </div>
       </div>
