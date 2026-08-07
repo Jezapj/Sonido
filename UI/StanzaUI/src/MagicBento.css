@@ -25,6 +25,7 @@
   justify-content: space-between;
   position: relative;
   height: 40vh;
+  min-height: 250px;
   width: 100%;
   max-width: 100%;
   padding: 1.25em;
@@ -61,6 +62,7 @@
 
 .magic-bento-card__content {
   flex-direction: column;
+  flex: 1;
 }
 
 .magic-bento-card__label {
@@ -113,7 +115,6 @@
 
   .magic-bento-card {
     width: 100%;
-    min-height: 180px;
   }
 }
 
