@@ -5,20 +5,20 @@ WARNING: Node N002 is floating.
 WARNING: Less than two connections to node N002.  This node is used by C5.
 Direct Newton iteration for .op point succeeded.
 
-Date: Tue Apr 07 18:53:59 2026
-Total elapsed time: 0.255 seconds.
+Date: Mon Sep 14 18:48:38 2026
+Total elapsed time: 0.429 seconds.
 
 tnom = 27
 temp = 27
 method = modified trap
-totiter = 65329
-traniter = 65308
-tranpoints = 19377
-accept = 13298
-rejected = 6079
+totiter = 44763
+traniter = 44742
+tranpoints = 14242
+accept = 9459
+rejected = 4783
 matrix size = 16
 fillins = 0
 solver = Normal
-Matrix Compiler1: 720 bytes object code size  0.2/0.1/[0.1]
-Matrix Compiler2: 1.13 KB object code size  0.1/0.1/[0.1]
+Matrix Compiler1: 720 bytes object code size  0.3/0.1/[0.1]
+Matrix Compiler2: off  [0.2]/0.2/0.2
 
