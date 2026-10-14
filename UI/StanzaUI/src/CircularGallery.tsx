@@ -257,6 +257,7 @@ class App {
   screen!: { width: number; height: number };
   viewport!: { width: number; height: number };
   raf = 0; isDown = false; start = 0;
+  baseHeight = 0;
   boundOnResize!:    () => void;
   boundOnWheel!:     (e: Event) => void;
   boundOnTouchDown!: (e: MouseEvent | TouchEvent) => void;
@@ -287,7 +288,14 @@ class App {
     this.renderer = new Renderer({ alpha: true, antialias: true, dpr: Math.min(window.devicePixelRatio || 1, 2) });
     this.gl = this.renderer.gl;
     this.gl.clearColor(0, 0, 0, 0);
-    this.container.appendChild(this.renderer.gl.canvas as HTMLCanvasElement);
+    const canvas = this.renderer.gl.canvas as HTMLCanvasElement;
+    this.container.appendChild(canvas);
+    // The container has no definite height from its parents, so it sizes to
+    // the canvas. Lock the initial height and take the canvas out of flow,
+    // otherwise every resize feeds the canvas size back into the container.
+    this.baseHeight = this.container.clientHeight;
+    this.container.style.height = `${this.baseHeight}px`;
+    Object.assign(canvas.style, { position: 'absolute', top: '0', left: '0', display: 'block' });
   }
 
   createCamera() { this.camera = new Camera(this.gl); this.camera.fov = 45; this.camera.position.z = 20; }
@@ -380,7 +388,7 @@ class App {
   }
 
   onResize() {
-    this.screen = { width: this.container.clientWidth, height: this.container.clientHeight };
+    this.screen = { width: this.container.clientWidth, height: this.baseHeight };
     this.renderer.setSize(this.screen.width, this.screen.height);
     this.camera.perspective({ aspect: this.screen.width / this.screen.height });
     const fov = (this.camera.fov * Math.PI) / 180;
