@@ -215,7 +215,11 @@ export default function RustStreamExample() {
     const canvas = gCanvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d")!;
-    const W = canvas.width, H = canvas.height;
+    const W = canvas.clientWidth, H = canvas.clientHeight;
+    const dpr = window.devicePixelRatio || 1;
+    const pw = Math.round(W * dpr), ph = Math.round(H * dpr);
+    if (canvas.width !== pw || canvas.height !== ph) { canvas.width = pw; canvas.height = ph; }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, W, H);
 
     ctx.strokeStyle = "rgba(255,255,255,0.05)";
@@ -365,6 +369,17 @@ export default function RustStreamExample() {
         paintBacking(bCanvasRef.current, bPeaksRef.current, 0);
     }
   }, []);
+
+  const clearBacking = useCallback(() => {
+    bStop(true);
+    bABufRef.current = null;
+    bPeaksRef.current = [];
+    bOffRef.current = 0;
+    lastSecRef.current = -1;
+    setBName("");
+    setBDur(0);
+    setBProg(0);
+  }, [bStop]);
 
   // ── Backing track: start ───────────────────────────────────────────────────
 
@@ -522,8 +537,20 @@ export default function RustStreamExample() {
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
+  // With no backing track loaded, the views grow to fill the card
+  const expanded = bDur === 0;
+
   return (
-    <div style={{ fontFamily: "monospace", padding: "0.6rem 0.2rem " }}>
+    <div
+      className={expanded ? "rse-root rse-root--expanded" : "rse-root"}
+      style={{
+        fontFamily: "monospace", padding: "0.6rem 0.2rem ",
+        ...(expanded && {
+          height: "100%", boxSizing: "border-box",
+          display: "flex", flexDirection: "column",
+        }),
+      }}
+    >
 
       {/* ── Status badge + monitor controls ──────────────────────────────── */}
       <div style={{
@@ -647,6 +674,7 @@ export default function RustStreamExample() {
           overflow: "hidden",
           touchAction: "pan-y",
           cursor: dragging ? "grabbing" : "grab",
+          ...(expanded && { flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }),
         }}
       >
       <div style={{
@@ -654,16 +682,22 @@ export default function RustStreamExample() {
         width: `${VIEW_COUNT * 100}%`,
         transform: `translateX(calc(${-view * 100 / VIEW_COUNT}% + ${dragging ? dragX : 0}px))`,
         transition: dragging ? "none" : "transform 0.28s cubic-bezier(0.22, 1, 0.36, 1)",
+        ...(expanded && { flex: 1, minHeight: 0 }),
       }}>
-      <div style={{ width: `${100 / VIEW_COUNT}%`, minWidth: 0 }}>
+      <div style={{
+        width: `${100 / VIEW_COUNT}%`, minWidth: 0,
+        ...(expanded && { display: "flex", flexDirection: "column" }),
+      }}>
 
       {/* ── Guitar waveform canvas ─────────────────────────────────────────── */}
       <div style={{
         border: "0.5px solid rgba(255,255,255,0.12)",
         borderRadius: 10, overflow: "hidden", marginBottom: 1,
+        position: "relative",
+        ...(expanded ? { flex: 1, minHeight: 70 } : { height: 70 }),
       }}>
-        <canvas ref={gCanvasRef} width={680} height={70}
-          style={{ display: "block", width: "100%", height: 70 }} />
+        <canvas ref={gCanvasRef}
+          style={{ position: "absolute", inset: 0, display: "block", width: "100%", height: "100%" }} />
       </div>
 
       {/* ── Stats row ─────────────────────────────────────────────────────── */}
@@ -734,20 +768,36 @@ export default function RustStreamExample() {
               </span>
             )}
           </div>
-          <button
-            onClick={() => fileRef.current?.click()}
-            disabled={bLoad}
-            style={{
-              ...btn,
-              borderColor: "rgba(99,102,241,0.45)",
-              color: "#818cf8",
-              opacity: bLoad ? 0.5 : 1,
-              padding: "4px 13px",
-              flexShrink: 0,
-            }}
-          >
-            {bLoad ? "Loading…" : bDur > 0 ? "Change" : "+ Add Audio"}
-          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+            <button
+              onClick={() => fileRef.current?.click()}
+              disabled={bLoad}
+              style={{
+                ...btn,
+                borderColor: "rgba(99,102,241,0.45)",
+                color: "#818cf8",
+                opacity: bLoad ? 0.5 : 1,
+                padding: "4px 13px",
+              }}
+            >
+              {bLoad ? "Loading…" : bDur > 0 ? "Change" : "+ Add Audio"}
+            </button>
+            {bDur > 0 && (
+              <button
+                type="button"
+                onClick={clearBacking}
+                title="Remove backing track"
+                style={{
+                  ...btn,
+                  borderColor: "rgba(239,68,68,0.55)",
+                  color: "#ef4444",
+                  padding: "4px 13px",
+                }}
+              >
+                Remove
+              </button>
+            )}
+          </div>
         </div>
 
         {/* ── Backing track body (only shown when a file is loaded) ────────── */}

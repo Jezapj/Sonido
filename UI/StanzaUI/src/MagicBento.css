@@ -198,6 +198,18 @@
     0 0 30px var(--purple-glow);
 }
 
+/* Waveform card: while no backing track is loaded, let its views fill the card */
+.magic-bento-card:has(.rse-root--expanded) .magic-bento-card__content {
+  flex: 1;
+  min-height: 0;
+}
+
+/* The wrapper is scaled 80% and shifted up 40px (MagicBento CARD2_CONTENT);
+   size it so its scaled bottom edge lands on the content bottom. */
+:root:not([data-compact="true"]) .magic-bento-card:has(.rse-root--expanded) .magic-bento-card__content > div > div {
+  height: calc((100% + 40px) / 0.9) !important;
+}
+
 .global-spotlight {
   mix-blend-mode: screen;
   will-change: transform, opacity;

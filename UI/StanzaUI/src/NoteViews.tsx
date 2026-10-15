@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useIsLightMode } from "./UseTheme";
 import { midiToName, NOTE_NAMES, STRING_LABELS } from "./music";
 import {
@@ -216,8 +216,10 @@ const MAX_LAYOUT = 600;
 const LETTER_OF_PC = [0, 0, 1, 1, 2, 3, 3, 4, 4, 5, 5, 6];
 const SHARP_PC = new Set([1, 3, 6, 8, 10]);
 const E4_STEP = 4 * 7 + 2;   // diatonic step of the bottom treble line
+const G2_STEP = 2 * 7 + 4;   // diatonic step of the bottom bass line
 
 export type NotationMode = "staff" | "tab";
+type ClefKind = "treble" | "bass";
 
 interface ScoreLayout {
   epoch: number;
@@ -227,10 +229,10 @@ interface ScoreLayout {
   lastTime: number;
 }
 
-function staffPos(writtenMidi: number) {
+function staffPos(writtenMidi: number, clef: ClefKind) {
   const pc = ((writtenMidi % 12) + 12) % 12;
   const step = (Math.floor(writtenMidi / 12) - 1) * 7 + LETTER_OF_PC[pc];
-  return { p: step - E4_STEP, sharp: SHARP_PC.has(pc) };
+  return { p: step - (clef === "bass" ? G2_STEP : E4_STEP), sharp: SHARP_PC.has(pc) };
 }
 
 export function NotationView({ active, mode }: { active: boolean; mode: NotationMode }) {
@@ -238,6 +240,10 @@ export function NotationView({ active, mode }: { active: boolean; mode: Notation
   const pal = usePalette();
   const modeRef = useRef(mode);
   modeRef.current = mode;
+  const [clef, setClef] = useState<ClefKind>("treble");
+  const clefRef = useRef(clef);
+  clefRef.current = clef;
+  const clefHitRef = useRef({ x: 0, y: 0, w: 0, h: 0 });
   const layoutRef = useRef<ScoreLayout>({ epoch: -1, pos: new Map(), lastPos: 0, scroll: 0, lastTime: 0 });
 
   useRaf(active, () => {
@@ -250,7 +256,8 @@ export function NotationView({ active, mode }: { active: boolean; mode: Notation
     const cur = getActiveNote();
     const isTab = modeRef.current === "tab";
 
-    const g = clamp(h / 12, 5, 11);                 // staff line gap
+    // 4 staff gaps + ~1.4 above (stems/ledger) + ~1.8 below (octave 8).
+    const g = clamp((h - 12) / 7.2, 5, 40);
     const minGap = Math.max(22, g * 3.2);
 
     // Lay notes out left→right: each new note spawns at the scroll head (or after the previous one)
@@ -275,7 +282,7 @@ export function NotationView({ active, mode }: { active: boolean; mode: Notation
     if (L.lastPos > L.scroll) L.scroll += (L.lastPos - L.scroll) * 0.2;
 
     const spawnX = w - 18;
-    const headerW = isTab ? 22 : g * 3.4 + 6;
+    const headerW = isTab ? Math.max(22, Math.round(h / 9)) : g * 3.4 + 6;
     const xOf = (n: NoteEvent) => spawnX - (L.scroll - (L.pos.get(n.id) ?? L.scroll));
     const alphaAt = (x: number) => clamp((x - headerW - 4) / 30, 0, 1);
 
@@ -285,14 +292,35 @@ export function NotationView({ active, mode }: { active: boolean; mode: Notation
     ctx.beginPath(); ctx.moveTo(spawnX + minGap / 2, 4); ctx.lineTo(spawnX + minGap / 2, h - 4); ctx.stroke();
 
     if (isTab) drawTab(ctx, w, h, p, notes, cur, xOf, alphaAt, headerW);
-    else       drawStaff(ctx, w, h, g, p, notes, cur, xOf, alphaAt);
+    else       drawStaff(ctx, w, h, g, p, notes, cur, xOf, alphaAt, clefRef.current, clefHitRef.current);
 
     if (notes.length === 0) hint(ctx, w, h, p, "play a note…");
   });
 
+  const onClefPointerDown = (e: React.PointerEvent) => {
+    if (modeRef.current !== "staff") return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const r = canvas.getBoundingClientRect();
+    const scaleX = canvas.clientWidth / r.width;
+    const x = (e.clientX - r.left) * scaleX;
+    const y = (e.clientY - r.top) * (canvas.clientHeight / r.height);
+    const hit = clefHitRef.current;
+    if (x >= hit.x && x <= hit.x + hit.w && y >= hit.y && y <= hit.y + hit.h) {
+      e.stopPropagation();
+      e.preventDefault();
+      setClef(c => c === "treble" ? "bass" : "treble");
+    }
+  };
+
   return (
     <div style={frameStyle(pal.current)}>
-      <canvas ref={canvasRef} style={canvasStyle} />
+      <canvas
+        ref={canvasRef}
+        style={{ ...canvasStyle, cursor: mode === "staff" ? "pointer" : "inherit" }}
+        onPointerDown={onClefPointerDown}
+        title={mode === "staff" ? "Tap the clef to switch treble / bass" : undefined}
+      />
     </div>
   );
 }
@@ -301,26 +329,38 @@ function drawStaff(
   ctx: CanvasRenderingContext2D, w: number, h: number, g: number, p: Palette,
   notes: readonly NoteEvent[], cur: NoteEvent | null,
   xOf: (n: NoteEvent) => number, alphaAt: (x: number) => number,
+  clef: ClefKind, hit: { x: number; y: number; w: number; h: number },
 ) {
-  const bottom = h / 2 + 2 * g;
+  const staffSpan = 4 * g;
+  const above = g * 1.05;
+  const below = g * 2.25;
+  const block = staffSpan + above + below;
+  const bottom = (h - block) / 2 + above + staffSpan;
   const yOfPos = (pos: number) => bottom - pos * (g / 2);
 
   ctx.strokeStyle = p.dim;
-  ctx.lineWidth = 0.8;
+  ctx.lineWidth = Math.max(0.8, g / 14);
   for (let i = 0; i < 5; i++) {
     const y = bottom - i * g;
     ctx.beginPath(); ctx.moveTo(4, y); ctx.lineTo(w - 4, y); ctx.stroke();
   }
 
-  // Treble clef with "8" below (guitar sounds an octave lower than written)
+  // Clef + "8" below (guitar sounds an octave lower than written)
   ctx.fillStyle = p.ink;
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
-  ctx.font = `${g * 6.2}px "Segoe UI Symbol", "Noto Music", "Apple Symbols", serif`;
-  ctx.fillText("\u{1D11E}", 6, bottom + g * 1.45);
+  const clefFont = `"Segoe UI Symbol", "Noto Music", "Apple Symbols", serif`;
+  if (clef === "treble") {
+    ctx.font = `${g * 5.58}px ${clefFont}`;
+    ctx.fillText("\u{1D11E}", 4, bottom + g * 0.55);
+  } else {
+    ctx.font = `${g * 3.9}px ${clefFont}`;
+    ctx.fillText("\u{1D122}", 5, bottom - g * 0.35);
+  }
   ctx.font = `${Math.max(7, g)}px serif`;
   ctx.textAlign = "center";
-  ctx.fillText("8", 6 + g * 1.25, bottom + g * 3.4);
+  ctx.fillText("8", 6 + g * 1.15, bottom + g * 1.45);
+  hit.x = 0; hit.y = bottom - 4.4 * g; hit.w = g * 3.4; hit.h = 6.2 * g;
 
   const rx = g * 0.66, ry = g * 0.47;
   for (const n of notes) {
@@ -328,7 +368,7 @@ function drawStaff(
     const a = alphaAt(x);
     if (a <= 0 || x > w) continue;
 
-    let { p: pos, sharp } = staffPos(n.midi + 12);
+    let { p: pos, sharp } = staffPos(n.midi + 12, clef);
     let ottava = false;
     if (pos > 15) { pos -= 7; ottava = true; }
     const y = yOfPos(pos);
@@ -378,13 +418,14 @@ function drawTab(
   notes: readonly NoteEvent[], cur: NoteEvent | null,
   xOf: (n: NoteEvent) => number, alphaAt: (x: number) => number, headerW: number,
 ) {
-  const s = clamp((h - 22) / 5, 7, 16);
-  const top = (h - 5 * s) / 2 + 4;
+  const s = clamp((h - 22) / 6.4, 7, 28);
+  const top = (h - 5 * s) / 2;
   const yOfString = (str: number) => top + (5 - str) * s;   // high e on top
+  const labelFs = clamp(s * 0.55, 9, 16);
 
   ctx.strokeStyle = p.dim;
-  ctx.lineWidth = 0.8;
-  ctx.font = "600 10px monospace";
+  ctx.lineWidth = Math.max(0.8, s / 18);
+  ctx.font = `600 ${labelFs}px monospace`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   for (let str = 0; str < 6; str++) {
@@ -394,7 +435,7 @@ function drawTab(
     ctx.fillText(STRING_LABELS[str], headerW / 2 + 1, y);
   }
 
-  const fs = clamp(s * 0.95, 9, 14);
+  const fs = clamp(s * 0.72, 9, 22);
   ctx.font = `700 ${fs}px monospace`;
   for (const n of notes) {
     if (n.string === null || n.fret === null) continue;
