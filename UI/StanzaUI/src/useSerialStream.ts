@@ -105,6 +105,13 @@ function sharedSetSelectedPort(p: string) {
   notifyState();
 }
 
+/** Subscribe to audio chunks outside React (e.g. shared analysers). Returns an unsubscribe fn. */
+export function addChunkHandler(fn: ChunkHandler): () => void {
+  chunkHandlers.add(fn);
+  if (sharedConnected) void ensureChunkListener();
+  return () => { chunkHandlers.delete(fn); };
+}
+
 // ── Hook ──────────────────────────────────────────────────────────────────────
 
 export function useSerialStream(

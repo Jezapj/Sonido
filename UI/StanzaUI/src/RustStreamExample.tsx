@@ -1,9 +1,16 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useSerialStream } from "./useSerialStream";
+import { useIsLightMode } from "./UseTheme";
+import { resetPitchTracker, startPitchTracker } from "./pitchTracker";
+import { NoteBarsView, NotationView, type NotationMode } from "./NoteViews";
 
 const GUITAR_BUF = 1024;
 const FS = 47991;
+
+const VIEW_LABELS = ["WAVE", "BARS", "SCORE"];
+const VIEW_COUNT = VIEW_LABELS.length;
+const SWIPE_THRESHOLD = 48;
 
 interface WaveformPeak {
   mn: number;
@@ -105,6 +112,16 @@ export default function RustStreamExample() {
   const [chunks,  setChunks]  = useState(0);
   const [chunkSz, setChunkSz] = useState<number | null>(null);
   const [peak,    setPeak]    = useState<number | null>(null);
+
+  // ── View carousel (waveform / bars / score) ─────────────────────────────────
+  const light = useIsLightMode();
+  const [view, setView] = useState(0);
+  const [scoreMode, setScoreMode] = useState<NotationMode>("staff");
+  const [dragX, setDragX] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const dragStartX = useRef(0);
+
+  useEffect(() => { startPitchTracker(); }, []);
 
   // ── Shared Web Audio context ────────────────────────────────────────────────
   const actxRef  = useRef<AudioContext | null>(null);
@@ -266,6 +283,7 @@ export default function RustStreamExample() {
     setChunks(0);
     setChunkSz(null);
     setPeak(null);
+    resetPitchTracker();
     if (hwMuted) {
       invoke<void>("set_output_mute", { muted: false }).catch(() => {});
       setHwMuted(false);
@@ -457,6 +475,35 @@ export default function RustStreamExample() {
     actxRef.current?.close();
   }, []);
 
+  // ── View carousel: buttons + swipe (loops) ─────────────────────────────────
+
+  const wrapView = (v: number) => ((v % VIEW_COUNT) + VIEW_COUNT) % VIEW_COUNT;
+  const goView = (dir: -1 | 1) => setView(v => wrapView(v + dir));
+
+  const onViewPointerDown = (e: React.PointerEvent) => {
+    const tag = (e.target as HTMLElement).tagName;
+    if (tag === "INPUT" || tag === "BUTTON" || tag === "SELECT" || tag === "TEXTAREA") return;
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    dragStartX.current = e.clientX;
+    setDragging(true);
+    setDragX(0);
+  };
+
+  const onViewPointerMove = (e: React.PointerEvent) => {
+    if (dragging) setDragX(e.clientX - dragStartX.current);
+  };
+
+  const onViewPointerUp = (e: React.PointerEvent) => {
+    if (!dragging) return;
+    const dx = e.clientX - dragStartX.current;
+    if (dx <= -SWIPE_THRESHOLD) goView(1);
+    else if (dx >= SWIPE_THRESHOLD) goView(-1);
+    setDragX(0);
+    setDragging(false);
+  };
+
+  const viewAccent = light ? "#6d28d9" : "#AFA9EC";
+
   // ── Shared button base style ───────────────────────────────────────────────
 
   const btn: React.CSSProperties = {
@@ -479,7 +526,64 @@ export default function RustStreamExample() {
     <div style={{ fontFamily: "monospace", padding: "0.6rem 0.2rem " }}>
 
       {/* ── Status badge + monitor controls ──────────────────────────────── */}
-      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 5, alignItems: "center", gap: 8 }}>
+      <div style={{
+        display: "flex", justifyContent: "space-between", marginBottom: 5,
+        alignItems: "center", gap: 8, flexWrap: "wrap", rowGap: 4,
+      }}>
+
+        {/* View selector */}
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <button type="button" onClick={() => goView(-1)} style={{ ...btn, padding: "2px 8px" }}>‹</button>
+          <span style={{
+            fontSize: 10, letterSpacing: "0.12em", minWidth: 38, textAlign: "center",
+            color: light ? "rgba(26,15,46,0.48)" : "rgba(255,255,255,0.45)",
+          }}>
+            {VIEW_LABELS[view]}
+          </span>
+          <div style={{ display: "flex", gap: 5 }}>
+            {VIEW_LABELS.map((label, i) => (
+              <button
+                key={label}
+                type="button"
+                onClick={() => setView(i)}
+                aria-label={`Show ${label} view`}
+                style={{
+                  width: 6, height: 6, borderRadius: "50%", padding: 0, border: "none",
+                  cursor: "pointer",
+                  background: i === view ? viewAccent : (light ? "rgba(0,0,0,0.25)" : "rgba(255,255,255,0.25)"),
+                  boxShadow: i === view ? `0 0 6px ${viewAccent}` : "none",
+                }}
+              />
+            ))}
+          </div>
+          <button type="button" onClick={() => goView(1)} style={{ ...btn, padding: "2px 8px" }}>›</button>
+          {view === 2 && (
+            <div style={{ display: "flex" }}>
+              {(["staff", "tab"] as const).map((m, i) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setScoreMode(m)}
+                  style={{
+                    ...btn,
+                    fontSize: 9, letterSpacing: "0.08em", padding: "2px 7px",
+                    borderRadius: i === 0 ? "7px 0 0 7px" : "0 7px 7px 0",
+                    marginLeft: i === 0 ? 0 : -0.5,
+                    borderColor: scoreMode === m ? viewAccent : "rgba(255,255,255,0.22)",
+                    color: scoreMode === m ? viewAccent : "rgba(255,255,255,0.5)",
+                    background: scoreMode === m
+                      ? (light ? "rgba(109,40,217,0.14)" : "rgba(175,169,236,0.12)")
+                      : "transparent",
+                  }}
+                >
+                  {m.toUpperCase()}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <span style={{
           fontSize: 11, padding: "1px 10px", borderRadius: 99,
           background: connected ? "rgba(83,74,183,0.25)" : "rgba(255,255,255,0.08)",
@@ -530,7 +634,28 @@ export default function RustStreamExample() {
         >
           {hwMuted ? "🔇 HW: Muted" : "🔊 HW: Live"}
         </button>
+        </div>
       </div>
+
+      {/* ── Swappable views: waveform+stats / bars / score ─────────────────── */}
+      <div
+        onPointerDown={onViewPointerDown}
+        onPointerMove={onViewPointerMove}
+        onPointerUp={onViewPointerUp}
+        onPointerCancel={onViewPointerUp}
+        style={{
+          overflow: "hidden",
+          touchAction: "pan-y",
+          cursor: dragging ? "grabbing" : "grab",
+        }}
+      >
+      <div style={{
+        display: "flex",
+        width: `${VIEW_COUNT * 100}%`,
+        transform: `translateX(calc(${-view * 100 / VIEW_COUNT}% + ${dragging ? dragX : 0}px))`,
+        transition: dragging ? "none" : "transform 0.28s cubic-bezier(0.22, 1, 0.36, 1)",
+      }}>
+      <div style={{ width: `${100 / VIEW_COUNT}%`, minWidth: 0 }}>
 
       {/* ── Guitar waveform canvas ─────────────────────────────────────────── */}
       <div style={{
@@ -563,6 +688,16 @@ export default function RustStreamExample() {
             </div>
           </div>
         ))}
+      </div>
+      </div>
+
+      <div style={{ width: `${100 / VIEW_COUNT}%`, minWidth: 0, display: "flex", flexDirection: "column" }}>
+        <NoteBarsView active={view === 1 || dragging} />
+      </div>
+      <div style={{ width: `${100 / VIEW_COUNT}%`, minWidth: 0, display: "flex", flexDirection: "column" }}>
+        <NotationView active={view === 2 || dragging} mode={scoreMode} />
+      </div>
+      </div>
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════════ */}

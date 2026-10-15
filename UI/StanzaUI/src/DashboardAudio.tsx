@@ -3,12 +3,10 @@ import { useSerialStream } from "./useSerialStream";
 import { useIsLightMode } from "./UseTheme";
 import DashboardMetronome from "./DashboardMetronome";
 import DashboardChordBank from "./DashboardChordBank";
+import { getLastNote, SAMPLE_RATE, startPitchTracker } from "./pitchTracker";
+import { midiToName } from "./music";
 
 const BUFFER_LEN  = 4096;
-const SAMPLE_RATE = 47991;
-
-const MIN_FREQ = 70;
-const MAX_FREQ = 400;
 const MAX_DISPLAY_HZ = 4000;
 
 const PANEL_COUNT = 3;
@@ -45,56 +43,6 @@ function fft(re: Float32Array, im: Float32Array) {
   }
 }
 
-function computeHPS(mags: Float32Array, harmonics = 5) {
-  const len = mags.length;
-  const hps = new Float32Array(len);
-  hps.set(mags);
-  for (let h = 2; h <= harmonics; h++)
-    for (let i = 0; i < len / h; i++) hps[i] *= mags[i * h];
-  let max = 0, index = 0;
-  for (let i = 10; i < len / harmonics; i++) if (hps[i] > max) { max = hps[i]; index = i; }
-  return { index, strength: max };
-}
-
-function autocorrelation(buf: Float32Array) {
-  const SIZE = buf.length;
-  let bestOffset = -1, bestCorr = 0;
-  for (let offset = 20; offset < SIZE / 2; offset++) {
-    let corr = 0;
-    for (let i = 0; i < SIZE / 2; i++) corr += buf[i] * buf[i + offset];
-    if (corr > bestCorr) { bestCorr = corr; bestOffset = offset; }
-  }
-  if (bestOffset === -1) return { freq: 0, strength: 0 };
-  return { freq: SAMPLE_RATE / bestOffset, strength: bestCorr };
-}
-
-function refinePeak(mags: Float32Array, index: number) {
-  if (index <= 0 || index >= mags.length - 1) return index;
-  const a = mags[index-1], b = mags[index], c = mags[index+1];
-  const denom = a - 2*b + c;
-  return denom === 0 ? index : index + 0.5*(a-c)/denom;
-}
-
-function correctSubharmonic(freq: number, mags: Float32Array) {
-  const bin = Math.round((freq * BUFFER_LEN) / SAMPLE_RATE);
-  for (let d = 2; d <= 4; d++) {
-    const subBin = Math.round(bin / d);
-    if (subBin < 5) continue;
-    if (mags[subBin] > mags[bin] * 0.5) return freq / d;
-  }
-  return freq;
-}
-
-function freqToNote(freq: number) {
-  if (freq <= 0) return "—";
-  const A4 = 440;
-  const names = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
-  const n = Math.round(12 * Math.log2(freq / A4));
-  const idx = (n + 9 + 1200) % 12;
-  const octave = 4 + Math.floor((n + 9) / 12);
-  return `${names[idx]}${octave}`;
-}
-
 const btnBaseDark: React.CSSProperties = {
   background: "transparent",
   border: "0.5px solid rgba(255,255,255,0.25)",
@@ -127,8 +75,9 @@ export default function DashboardAudio() {
   const bufferRef   = useRef<Float32Array>(new Float32Array(BUFFER_LEN));
   const animRef     = useRef(0);
   const runningRef  = useRef(false);
-  const prevFreqRef = useRef(0);
   const [note, setNote] = useState("—");
+
+  useEffect(() => { startPitchTracker(); }, []);
 
   // ── Carousel ───────────────────────────────────────────────────────────────
   const [page, setPage] = useState(0);
@@ -163,20 +112,8 @@ export default function DashboardAudio() {
     const mags = new Float32Array(BUFFER_LEN / 2);
     for (let i = 0; i < mags.length; i++) mags[i] = Math.sqrt(re[i]**2 + im[i]**2);
 
-    const { index: hpsIdx, strength } = computeHPS(mags);
-    const refined = refinePeak(mags, hpsIdx);
-    const freqHPS = (refined * SAMPLE_RATE) / BUFFER_LEN;
-    const ac = autocorrelation(bufferRef.current);
-
-    let freq = (ac.strength > 0.2 && Math.abs(freqHPS - ac.freq) < 50)
-      ? 0.5 * freqHPS + 0.5 * ac.freq
-      : ac.freq;
-    freq = correctSubharmonic(freq, mags);
-    if (freq < MIN_FREQ || freq > MAX_FREQ) freq = prevFreqRef.current;
-    if (strength < 1e-4) freq = 0;
-    freq = prevFreqRef.current * 0.8 + freq * 0.2;
-    prevFreqRef.current = freq;
-    setNote(freqToNote(freq));
+    const last = getLastNote();
+    setNote(last ? midiToName(last.midi) : "—");
 
     const displayBins = Math.min(
       mags.length,
