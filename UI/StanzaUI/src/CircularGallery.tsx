@@ -351,7 +351,7 @@ class App {
   }
 
   onTouchUp() {
-    if (!this.interactionEnabled) return;
+    if (!this.interactionEnabled || !this.isDown) return;
     const moved = Math.abs(this.lastX - this.startX);
     this.isDown = false;
     if (moved < 6 && this.onCardClick) {
@@ -431,16 +431,15 @@ class App {
     this.boundOnTouchMove = this.onTouchMove.bind(this);
     this.boundOnTouchUp   = this.onTouchUp.bind(this);
     window.addEventListener('resize', this.boundOnResize);
-    // Wheel is scoped to the gallery container so scrolling other bento cards
-    // (dashboard carousel, presets) does not move the DSP gallery.
+    // Wheel and pointer-down stay on this gallery so other bento cards
+    // (dashboard, waveform, presets) do not start a DSP drag or click.
     this.container.addEventListener('wheel', this.boundOnWheel, { passive: true });
     this.container.addEventListener('mousewheel', this.boundOnWheel as EventListener, { passive: true } as AddEventListenerOptions);
-    // Pointer down only matters when over the gallery (gated in onTouchDown);
-    // move/up stay on window so an in-progress drag can finish outside the card.
-    window.addEventListener('mousedown',  this.boundOnTouchDown);
+    this.container.addEventListener('mousedown',  this.boundOnTouchDown);
+    this.container.addEventListener('touchstart', this.boundOnTouchDown, { passive: true });
+    // Move/up stay on window so an in-progress drag can finish outside the card.
     window.addEventListener('mousemove',  this.boundOnTouchMove);
     window.addEventListener('mouseup',    this.boundOnTouchUp);
-    window.addEventListener('touchstart', this.boundOnTouchDown, { passive: true });
     window.addEventListener('touchmove',  this.boundOnTouchMove, { passive: true });
     window.addEventListener('touchend',   this.boundOnTouchUp);
   }
@@ -450,10 +449,10 @@ class App {
     window.removeEventListener('resize', this.boundOnResize);
     this.container.removeEventListener('wheel', this.boundOnWheel);
     this.container.removeEventListener('mousewheel', this.boundOnWheel as EventListener);
-    window.removeEventListener('mousedown',  this.boundOnTouchDown);
+    this.container.removeEventListener('mousedown',  this.boundOnTouchDown);
+    this.container.removeEventListener('touchstart', this.boundOnTouchDown);
     window.removeEventListener('mousemove',  this.boundOnTouchMove);
     window.removeEventListener('mouseup',    this.boundOnTouchUp);
-    window.removeEventListener('touchstart', this.boundOnTouchDown);
     window.removeEventListener('touchmove',  this.boundOnTouchMove);
     window.removeEventListener('touchend',   this.boundOnTouchUp);
     const c = this.renderer?.gl?.canvas as HTMLCanvasElement | undefined;
