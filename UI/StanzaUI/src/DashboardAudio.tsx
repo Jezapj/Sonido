@@ -161,9 +161,11 @@ export default function DashboardAudio() {
   const wrapPage = (p: number) => ((p % PANEL_COUNT) + PANEL_COUNT) % PANEL_COUNT;
 
   const onPointerDown = (e: React.PointerEvent) => {
-    // Don't steal drags from sliders / buttons
-    const tag = (e.target as HTMLElement).tagName;
+    // Don't steal drags from sliders / buttons / the songs list (folder DnD)
+    const el = e.target as HTMLElement;
+    const tag = el.tagName;
     if (tag === "INPUT" || tag === "BUTTON" || tag === "SELECT" || tag === "TEXTAREA") return;
+    if (el.closest(".da-chords")) return;
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     dragStartX.current = e.clientX;
     dragStartPage.current = pageRef.current;
@@ -251,7 +253,7 @@ export default function DashboardAudio() {
         display: "flex", alignItems: "center", justifyContent: "space-between",
         width: PANEL_W, marginBottom: 4, marginTop: connected ? 0 : 2,
       }}>
-        <button type="button" onClick={() => goPage(-1)} style={{ ...btnBase, padding: "2px 8px" }}>‹</button>
+        <button type="button" onClick={() => goPage(-1)} style={{ ...btnBase }}>‹</button>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span className="da-label" style={{
             fontFamily: "monospace", fontSize: 10, letterSpacing: "0.12em",
@@ -276,7 +278,7 @@ export default function DashboardAudio() {
             ))}
           </div>
         </div>
-        <button type="button" onClick={() => goPage(1)} style={{ ...btnBase, padding: "2px 8px" }}>›</button>
+        <button type="button" onClick={() => goPage(1)} style={{ ...btnBase }}>›</button>
       </div>
 
       <div

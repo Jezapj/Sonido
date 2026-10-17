@@ -364,6 +364,11 @@
   box-shadow: none !important;
 }
 
+[data-theme="light"] .da-folder-row {
+  background: rgba(109, 40, 217, 0.08) !important;
+  border-color: rgba(109, 40, 217, 0.28) !important;
+}
+
 /* Time signature value, song titles, SONGS (n) — black in light mode */
 [data-theme="light"] .da-sig-label,
 [data-theme="light"] .da-song-title,
