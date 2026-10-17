@@ -256,8 +256,8 @@ export function NotationView({ active, mode }: { active: boolean; mode: Notation
     const cur = getActiveNote();
     const isTab = modeRef.current === "tab";
 
-    // 4 staff gaps + ~1.4 above (stems/ledger) + ~1.8 below (octave 8).
-    const g = clamp((h - 12) / 7.2, 5, 40);
+    // Staff is zoomed out a bit more than tab (larger divisor → smaller notation).
+    const g = clamp((h - 16) / 9.4, 5, 28);
     const minGap = Math.max(22, g * 3.2);
 
     // Lay notes out left→right: each new note spawns at the scroll head (or after the previous one)
@@ -418,7 +418,7 @@ function drawTab(
   notes: readonly NoteEvent[], cur: NoteEvent | null,
   xOf: (n: NoteEvent) => number, alphaAt: (x: number) => number, headerW: number,
 ) {
-  const s = clamp((h - 22) / 6.4, 7, 28);
+  const s = clamp((h - 28) / 7.4, 7, 22);
   const top = (h - 5 * s) / 2;
   const yOfString = (str: number) => top + (5 - str) * s;   // high e on top
   const labelFs = clamp(s * 0.55, 9, 16);
