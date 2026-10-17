@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useIsLightMode } from "./UseTheme";
+import { markClickHandled } from "./focusGuard";
 import { midiToName, NOTE_NAMES, STRING_LABELS } from "./music";
 import {
   getActiveNote, getNotes, getPitchFrame, getTrackerEpoch, type NoteEvent,
@@ -297,28 +298,36 @@ export function NotationView({ active, mode }: { active: boolean; mode: Notation
     if (notes.length === 0) hint(ctx, w, h, p, "play a note…");
   });
 
-  const onClefPointerDown = (e: React.PointerEvent) => {
-    if (modeRef.current !== "staff") return;
+  const overClef = (e: React.PointerEvent) => {
+    if (modeRef.current !== "staff") return false;
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas) return false;
     const r = canvas.getBoundingClientRect();
-    const scaleX = canvas.clientWidth / r.width;
-    const x = (e.clientX - r.left) * scaleX;
+    const x = (e.clientX - r.left) * (canvas.clientWidth / r.width);
     const y = (e.clientY - r.top) * (canvas.clientHeight / r.height);
     const hit = clefHitRef.current;
-    if (x >= hit.x && x <= hit.x + hit.w && y >= hit.y && y <= hit.y + hit.h) {
-      e.stopPropagation();
-      e.preventDefault();
-      setClef(c => c === "treble" ? "bass" : "treble");
-    }
+    return x >= hit.x && x <= hit.x + hit.w && y >= hit.y && y <= hit.y + hit.h;
+  };
+
+  const onClefPointerDown = (e: React.PointerEvent) => {
+    if (!overClef(e)) return;
+    e.stopPropagation();
+    e.preventDefault();
+    markClickHandled();
+    setClef(c => c === "treble" ? "bass" : "treble");
+  };
+
+  const onCanvasPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    e.currentTarget.style.cursor = overClef(e) ? "pointer" : "";
   };
 
   return (
     <div style={frameStyle(pal.current)}>
       <canvas
         ref={canvasRef}
-        style={{ ...canvasStyle, cursor: mode === "staff" ? "pointer" : "inherit" }}
+        style={canvasStyle}
         onPointerDown={onClefPointerDown}
+        onPointerMove={onCanvasPointerMove}
         title={mode === "staff" ? "Tap the clef to switch treble / bass" : undefined}
       />
     </div>

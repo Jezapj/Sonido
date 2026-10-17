@@ -64,7 +64,7 @@ const btnBaseLight: React.CSSProperties = {
 };
 
 // ── Component ─────────────────────────────────────────────────────────────────
-export default function DashboardAudio() {
+export default function DashboardAudio({ focused = false }: { focused?: boolean }) {
   const light = useIsLightMode();
   const btnBase = light ? btnBaseLight : btnBaseDark;
   const accent = light ? "#6d28d9" : "#AFA9EC";
@@ -88,6 +88,32 @@ export default function DashboardAudio() {
   const pageRef = useRef(0);
 
   useEffect(() => { pageRef.current = page; }, [page]);
+
+  // ── Focus zoom: scale the fixed-width panel up to fill the focused card ────
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [zoom, setZoom] = useState(1);
+  const zoomRef = useRef(1);
+  useEffect(() => { zoomRef.current = zoom; }, [zoom]);
+
+  useEffect(() => {
+    if (!focused) { setZoom(1); return; }
+    const root = rootRef.current;
+    const parent = root?.parentElement;
+    if (!root || !parent) return;
+    const fit = () => {
+      // offset* sizes ignore transforms, so this is the unscaled panel size
+      const natW = root.offsetWidth, natH = root.offsetHeight;
+      if (!natW || !natH) return;
+      const next = Math.max(1, Math.min((parent.clientWidth - 24) / natW, (parent.clientHeight - 8) / natH));
+      if (Math.abs(next - zoomRef.current) > 0.01) setZoom(next);
+    };
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(parent);
+    ro.observe(root);
+    return () => ro.disconnect();
+  }, [focused]);
+  const fftScale = zoom > 1 ? zoom * (window.devicePixelRatio || 1) : 1;
 
   const ingestChunk = useCallback((samples: number[]) => {
     let energy = 0;
@@ -175,7 +201,7 @@ export default function DashboardAudio() {
 
   const onPointerMove = (e: React.PointerEvent) => {
     if (!dragging) return;
-    setDragX(e.clientX - dragStartX.current);
+    setDragX((e.clientX - dragStartX.current) / zoomRef.current);
   };
 
   const finishDrag = (clientX: number) => {
@@ -200,7 +226,13 @@ export default function DashboardAudio() {
   const trackOffset = -page * PANEL_W + (dragging ? dragX : 0);
 
   return (
-    <div className="da-root" style={{ position: "absolute", bottom: 0, left: 10, color: rootColor }}>
+    <div
+      ref={rootRef}
+      className="da-root"
+      style={focused
+        ? { position: "relative", margin: "auto", transform: `scale(${zoom})`, flexShrink: 0, color: rootColor }
+        : { position: "absolute", bottom: 0, left: 10, color: rootColor }}
+    >
       {!connected ? (
         <div style={{ width: PANEL_W, marginBottom: 6 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
@@ -303,7 +335,7 @@ export default function DashboardAudio() {
           }}
         >
           <div style={{ width: PANEL_W, flexShrink: 0 }}>
-            <canvas ref={canvasRef} width={300} height={120} className="da-fft-canvas" />
+            <canvas ref={canvasRef} width={Math.round(300 * fftScale)} height={Math.round(120 * fftScale)} className="da-fft-canvas" style={{ width: 300, height: 120 }} />
             <div className="da-accent" style={{ marginTop: 10, fontSize: 30, fontWeight: "bold", color: accent }}>
               {note}
             </div>

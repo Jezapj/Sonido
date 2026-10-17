@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import PedalOverlay from './PedalOverlay';
 import LooperOverlay from './LooperOverlay';
+import { markClickHandled } from './focusGuard';
 import type { PedalState } from './PedalOverlay';
 import './CircularGallery.css';
 
@@ -324,7 +325,7 @@ class App {
     const canvas = this.renderer.gl.canvas as HTMLCanvasElement;
     const rect   = canvas.getBoundingClientRect();
     if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) return null;
-    const worldX = ((clientX - rect.left) * 0.8 / this.screen.width - 0.5) * this.viewport.width + 1;
+    const worldX = ((clientX - rect.left) / rect.width - 0.5) * this.viewport.width;
     let closest: Media | null = null; let minDist = Infinity;
     for (const m of this.medias) {
       const d = Math.abs(m.plane.position.x - worldX);
@@ -356,7 +357,7 @@ class App {
     this.isDown = false;
     if (moved < 6 && this.onCardClick) {
       const item = this.findClickedItem(this.startX, this.startY);
-      if (item) { this.onCardClick(item); return; }
+      if (item) { markClickHandled(); this.onCardClick(item); return; }
     }
     this.onCheck();
   }
@@ -385,6 +386,16 @@ class App {
     const w = this.medias[0].width;
     const i = Math.round(Math.abs(this.scroll.target) / w) * w;
     this.scroll.target = this.scroll.target < 0 ? -i : i;
+  }
+
+  /** Re-lock the container to a new height (e.g. when the card is focused). */
+  setHeight(h: number) {
+    if (h <= 0) return;
+    const w = this.container.clientWidth;
+    if (Math.abs(h - this.baseHeight) < 1 && w === this.screen?.width) return;
+    this.baseHeight = h;
+    this.container.style.height = `${h}px`;
+    this.onResize();
   }
 
   onResize() {
@@ -473,6 +484,8 @@ interface CircularGalleryProps {
   pedalStates?:         Record<string, PedalState>;
   theme?:               'dark' | 'light';
   onPedalStatesChange?: (states: Record<string, PedalState>) => void;
+  /** Card is zoomed: fill the parent's height instead of the locked one. */
+  focused?:             boolean;
 }
 
 export default function CircularGallery({
@@ -480,11 +493,13 @@ export default function CircularGallery({
   borderRadius = 0.05, font = 'bold 700px Figtree',
   scrollSpeed = 2, scrollEase = 0.05,
   pedalStates: externalPedalStates,
-  onPedalStatesChange, 
+  onPedalStatesChange, focused = false,
 }: CircularGalleryProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const appRef       = useRef<App | null>(null);
   const dotRefs      = useRef<Record<string, HTMLDivElement>>({});
+  const normalHeightRef = useRef(0);
+  const [appEpoch, setAppEpoch] = useState(0);
 
   const [clickedItem, setClickedItem] = useState<GalleryItem | null>(null);
 
@@ -537,8 +552,25 @@ export default function CircularGallery({
       onFramePositions,
     });
     appRef.current = app;
+    setAppEpoch(n => n + 1);
     return () => { app.destroy(); appRef.current = null; };
   }, [items, bend, textColor, borderRadius, font, scrollSpeed, scrollEase, onFramePositions]);
+
+  useEffect(() => {
+    const app = appRef.current;
+    const el  = containerRef.current;
+    if (!app || !el) return;
+    if (!focused && normalHeightRef.current === 0) normalHeightRef.current = app.baseHeight;
+    const parent = el.parentElement;
+    const apply = () => {
+      const h = focused && parent ? parent.clientHeight : normalHeightRef.current;
+      app.setHeight(h || app.baseHeight);
+    };
+    apply();
+    const ro = new ResizeObserver(apply);
+    ro.observe(focused && parent ? parent : el);
+    return () => ro.disconnect();
+  }, [focused, appEpoch]);
 
   useEffect(() => {
     appRef.current?.setInteractionEnabled(clickedItem === null);

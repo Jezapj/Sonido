@@ -206,8 +206,109 @@
 
 /* The wrapper is scaled 80% and shifted up 40px (MagicBento CARD2_CONTENT);
    size it so its scaled bottom edge lands on the content bottom. */
-:root:not([data-compact="true"]) .magic-bento-card:has(.rse-root--expanded) .magic-bento-card__content > div > div {
+:root:not([data-compact="true"]) .magic-bento-card:not(.magic-bento-card--focused):has(.rse-root--expanded) .magic-bento-card__content > div > div {
   height: calc((100% + 40px) / 0.9) !important;
+}
+
+/* ── Focus zoom ─────────────────────────────────────────────────── */
+
+.magic-bento-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000001; /* above the dock (Dock.css) */
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  animation: mb-backdrop-in 0.3s ease;
+}
+
+@keyframes mb-backdrop-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.card-grid .magic-bento-card.magic-bento-card--focused {
+  position: fixed !important;
+  inset: 4vh 3vw;
+  width: auto !important;
+  height: auto !important;
+  max-width: none;
+  z-index: 1000002;
+  transition: none;
+  cursor: default;
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.6);
+}
+
+.card-grid .magic-bento-card.magic-bento-card--focused:hover {
+  transform: none;
+}
+
+.card-grid .magic-bento-card.magic-bento-card--closing {
+  z-index: 1000002;
+  transition: none;
+}
+
+[data-compact="true"] .card-grid .magic-bento-card.magic-bento-card--focused {
+  inset: 6px;
+}
+
+.magic-bento-card--focused .magic-bento-card__content {
+  flex: 1;
+  min-height: 0;
+}
+
+/* Undo each card's in-grid offset/scale hacks so the content fills the card */
+.card-grid > .magic-bento-card--focused.magic-bento-card--focused.magic-bento-card .magic-bento-card__content > div > div {
+  height: 100% !important;
+  top: 0 !important;
+  scale: none !important;
+}
+
+.magic-bento-card--focused .da-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Gallery wrapper is no longer scaled, so the overlay is viewport-fixed again */
+.magic-bento-card--focused .po-overlay {
+  top: 0 !important;
+}
+
+.magic-bento-card__close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.85);
+  box-shadow: none;
+  cursor: pointer;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 20;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.magic-bento-card--focused:has(.po-overlay) .magic-bento-card__close {
+  visibility: hidden;
+}
+
+.magic-bento-card__close:hover {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+[data-theme="light"] .magic-bento-card__close {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+[data-theme="light"] .magic-bento-backdrop {
+  background: rgba(240, 236, 248, 0.55);
 }
 
 .global-spotlight {

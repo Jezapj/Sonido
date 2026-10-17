@@ -1,6 +1,7 @@
-import React, { useRef, useEffect, useCallback, useState, useMemo } from 'react';
+import React, { useRef, useEffect, useLayoutEffect, useCallback, useState, useMemo } from 'react';
 import { gsap } from 'gsap';
 import './MagicBento.css';
+import { wasClickHandled } from './focusGuard';
 import CircularGallery from './CircularGallery';
 import RustStreamExample from './RustStreamExample';
 import DashboardAudio from './DashboardAudio';
@@ -52,9 +53,9 @@ const STATIC_CARDS: Omit<BentoCardProps, 'content'>[] = [
   { color: cardColour, title: 'FFT',         description: 'Waveform analysis',     label: 'Waveform',  glowRgb: '0, 0, 255'   },
 ];
 
-const CARD1_CONTENT = (
-  <div style={{ height: '100%', position: 'relative', top: '0', color: 'black' }}>
-    <DashboardAudio />
+const cardOneContent = (focused: boolean) => (
+  <div className="da-wrap" style={{ height: '100%', position: 'relative', top: '0', color: 'black' }}>
+    <DashboardAudio focused={focused} />
   </div>
 );
 
@@ -63,6 +64,20 @@ const CARD2_CONTENT = (
     <RustStreamExample />
   </div>
 );
+
+// Clicks on (or inside) these never focus a card.
+const FUNCTIONAL_SELECTOR =
+  'button, a, input, select, textarea, label, [role="button"], [contenteditable="true"], .po-overlay, [data-no-focus]';
+
+const isFunctionalTarget = (target: EventTarget | null, card: HTMLElement): boolean => {
+  if (!(target instanceof Element)) return true;
+  if (target.closest(FUNCTIONAL_SELECTOR)) return true;
+  // Custom clickable divs (preset rows, seek bar…) advertise themselves via cursor
+  for (let el: Element | null = target; el && el !== card; el = el.parentElement) {
+    if (getComputedStyle(el).cursor === 'pointer') return true;
+  }
+  return false;
+};
 
 // ── CardContent ───────────────────────────────────────────────────────────────
 
@@ -116,10 +131,11 @@ const ParticleCard: React.FC<{
   enableTilt?: boolean;
   clickEffect?: boolean;
   enableMagnetism?: boolean;
+  domProps?: React.HTMLAttributes<HTMLDivElement>;
 }> = ({
   children, className = '', disableAnimations = false, style,
   particleCount = DEFAULT_PARTICLE_COUNT, glowColor = DEFAULT_GLOW_COLOR,
-  enableTilt = true, clickEffect = false, enableMagnetism = false,
+  enableTilt = true, clickEffect = false, enableMagnetism = false, domProps,
 }) => {
   const cardRef               = useRef<HTMLDivElement>(null);
   const particlesRef          = useRef<HTMLDivElement[]>([]);
@@ -215,6 +231,7 @@ const ParticleCard: React.FC<{
 
   return (
     <div
+      {...domProps}
       ref={cardRef}
       className={`${className} particle-container`}
       style={{ ...style, position: 'relative', overflow: 'hidden', '--glow-rgb': (style as any)?.['--glow-rgb'] || glowColor } as any}
@@ -290,12 +307,25 @@ const GlobalSpotlight: React.FC<{
 
 // ── CardInner ─────────────────────────────────────────────────────────────────
 
-const CardInner: React.FC<{ card: BentoCardProps }> = ({ card }) => {
+const CardInner: React.FC<{ card: BentoCardProps; onClose?: () => void }> = ({ card, onClose }) => {
   const { label, title, description, content, contentInteractive = false } = card;
   return (
     <>
       <div className="magic-bento-card__header">
         <div className="magic-bento-card__label">{label}</div>
+        {onClose && (
+          <button
+            type="button"
+            className="magic-bento-card__close"
+            onClick={e => { e.stopPropagation(); onClose(); }}
+            aria-label={`Close ${label ?? 'card'}`}
+            title="Close"
+          >
+            <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+              <path d="M2 2 L12 12 M12 2 L2 12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+            </svg>
+          </button>
+        )}
       </div>
       <div className="magic-bento-card__content">
         {content ? (
@@ -365,6 +395,79 @@ const MagicBento: React.FC<BentoProps> = ({
     }
   }, [setPedalStates]);
 
+  // ── Focus zoom ────────────────────────────────────────────────────────────
+  const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
+  const [closingIndex, setClosingIndex] = useState<number | null>(null);
+  const flipFromRef = useRef<DOMRect | null>(null);
+  const pressRef    = useRef<{ x: number; y: number; index: number } | null>(null);
+
+  const cardEl = (index: number) =>
+    (gridRef.current?.children[index] as HTMLElement | undefined) ?? null;
+
+  const openFocus = useCallback((index: number) => {
+    flipFromRef.current = cardEl(index)?.getBoundingClientRect() ?? null;
+    setClosingIndex(null);
+    setFocusedIndex(index);
+  }, []);
+
+  const closeFocus = useCallback(() => {
+    if (focusedIndex === null) return;
+    flipFromRef.current = cardEl(focusedIndex)?.getBoundingClientRect() ?? null;
+    setClosingIndex(focusedIndex);
+    setFocusedIndex(null);
+  }, [focusedIndex]);
+
+  // FLIP: the card jumps to its new layout, then animates from the old rect.
+  useLayoutEffect(() => {
+    const index = focusedIndex ?? closingIndex;
+    const from  = flipFromRef.current;
+    flipFromRef.current = null;
+    if (index === null || !from) return;
+    const el = cardEl(index);
+    if (!el) return;
+    gsap.killTweensOf(el);
+    gsap.set(el, { clearProps: 'transform' });
+    const to = el.getBoundingClientRect();
+    const done = () => { if (focusedIndex === null) setClosingIndex(null); };
+    if (!to.width || !to.height || shouldDisableAnimations) { done(); return; }
+    gsap.fromTo(el,
+      {
+        x: from.left - to.left, y: from.top - to.top,
+        scaleX: from.width / to.width, scaleY: from.height / to.height,
+        transformOrigin: '0 0',
+      },
+      {
+        x: 0, y: 0, scaleX: 1, scaleY: 1,
+        duration: 0.38, ease: 'power3.out',
+        clearProps: 'transform,transformOrigin',
+        onComplete: done,
+      },
+    );
+  }, [focusedIndex, closingIndex, shouldDisableAnimations]);
+
+  useEffect(() => {
+    if (focusedIndex === null) return;
+    const onKey = (e: KeyboardEvent) => {
+      // Let an open pedal / looper overlay handle Escape first
+      if (e.key === 'Escape' && !document.querySelector('.po-overlay')) closeFocus();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [focusedIndex, closeFocus]);
+
+  const cardDomProps = (index: number): React.HTMLAttributes<HTMLDivElement> => ({
+    onPointerDownCapture: e => { pressRef.current = { x: e.clientX, y: e.clientY, index }; },
+    onClick: e => {
+      const press = pressRef.current;
+      pressRef.current = null;
+      if (focusedIndex !== null || closingIndex !== null) return;
+      if (!press || press.index !== index) return;
+      if (Math.hypot(e.clientX - press.x, e.clientY - press.y) > 6) return;
+      if (wasClickHandled() || isFunctionalTarget(e.target, e.currentTarget)) return;
+      openFocus(index);
+    },
+  });
+
   // Dynamic cards — rebuilt when pedalStates changes.
   const dynamicCards = useMemo<BentoCardProps[]>(() => [
     {
@@ -378,6 +481,7 @@ const MagicBento: React.FC<BentoProps> = ({
             pedalStates={pedalStates}
             onPedalStatesChange={setPedalStates}
             theme={theme}
+            focused={focusedIndex === 2}
           />
         </div>
       ),
@@ -394,16 +498,19 @@ const MagicBento: React.FC<BentoProps> = ({
         />
       ),
     },
-  ], [pedalStates, setPedalStates, handleLoadPreset, onPresetSaved, theme]);
+  ], [pedalStates, setPedalStates, handleLoadPreset, onPresetSaved, theme, focusedIndex]);
 
+  const dashboardFocused = focusedIndex === 0;
   const cardData: BentoCardProps[] = useMemo(() => [
-    { ...STATIC_CARDS[0], content: CARD1_CONTENT, contentInteractive: true },
+    { ...STATIC_CARDS[0], content: cardOneContent(dashboardFocused), contentInteractive: true },
     { ...STATIC_CARDS[1], content: CARD2_CONTENT, contentInteractive: true },
     ...dynamicCards,
-  ], [dynamicCards]);
+  ], [dynamicCards, dashboardFocused]);
 
-  const baseClassName = () =>
-    `magic-bento-card ${textAutoHide ? 'magic-bento-card--text-autohide' : ''} ${enableBorderGlow ? 'magic-bento-card--border-glow' : ''}`;
+  const baseClassName = (index: number) =>
+    `magic-bento-card ${textAutoHide ? 'magic-bento-card--text-autohide' : ''} ${enableBorderGlow ? 'magic-bento-card--border-glow' : ''}` +
+    (focusedIndex === index ? ' magic-bento-card--focused' : '') +
+    (closingIndex === index ? ' magic-bento-card--closing' : '');
 
   const cardStyle = (card: BentoCardProps): React.CSSProperties => ({
     backgroundColor: card.color,
@@ -422,28 +529,33 @@ const MagicBento: React.FC<BentoProps> = ({
           glowColor={glowColor}
         />
       )}
+      {focusedIndex !== null && (
+        <div className="magic-bento-backdrop" onClick={closeFocus} aria-hidden="true" />
+      )}
       <div className="card-grid bento-section" ref={gridRef}>
-        {cardData.map((card, index) =>
-          enableStars ? (
+        {cardData.map((card, index) => {
+          const onClose = focusedIndex === index ? closeFocus : undefined;
+          return enableStars ? (
             <ParticleCard
               key={index}
-              className={baseClassName()}
+              className={baseClassName(index)}
               style={cardStyle(card)}
               disableAnimations={shouldDisableAnimations}
               particleCount={particleCount}
               glowColor={glowColor}
-              enableTilt={enableTilt}
+              enableTilt={enableTilt && focusedIndex !== index}
               clickEffect={clickEffect}
-              enableMagnetism={enableMagnetism}
+              enableMagnetism={enableMagnetism && focusedIndex !== index}
+              domProps={cardDomProps(index)}
             >
-              <CardInner card={card} />
+              <CardInner card={card} onClose={onClose} />
             </ParticleCard>
           ) : (
-            <div key={index} className={baseClassName()} style={cardStyle(card)}>
-              <CardInner card={card} />
+            <div key={index} className={baseClassName(index)} style={cardStyle(card)} {...cardDomProps(index)}>
+              <CardInner card={card} onClose={onClose} />
             </div>
-          )
-        )}
+          );
+        })}
       </div>
     </>
   );
