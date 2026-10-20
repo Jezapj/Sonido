@@ -4,6 +4,8 @@
  * Single shared monophonic pitch tracker. Subscribes once to the serial audio
  * stream, runs YIN pitch detection and turns the result into discrete note
  * events (with onset / release detection and a guitar fingering per note).
+ * The voiced frequency is then refined with a harmonic phase difference so
+ * the fractional MIDI value is stable to about a cent (the tuner reads this).
  * Consumers poll the getters from their own draw loops.
  */
 
@@ -80,6 +82,80 @@ let started = false;
 
 let yinFreq = 0, yinClarity = 0;
 
+const REFINE_LEN = 2048;
+const HANN = new Float32Array(REFINE_LEN);
+for (let i = 0; i < REFINE_LEN; i++) {
+  HANN[i] = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (REFINE_LEN - 1)));
+}
+
+/** Hann-windowed Goertzel. Phase is referenced the same way for every call. */
+function goertzel(offset: number, len: number, freq: number) {
+  const w = (2 * Math.PI * freq) / SAMPLE_RATE;
+  const cosine = Math.cos(w);
+  const sine = Math.sin(w);
+  const coeff = 2 * cosine;
+  let s1 = 0, s2 = 0;
+  for (let i = 0; i < len; i++) {
+    const s0 = buf[offset + i] * HANN[i] + coeff * s1 - s2;
+    s2 = s1;
+    s1 = s0;
+  }
+  const real = s1 - s2 * cosine;
+  const imag = s2 * sine;
+  return { real, imag, mag: real * real + imag * imag };
+}
+
+/**
+ * Tighten a YIN estimate from the phase shift of each strong harmonic
+ * between two windows, then average those fundamental estimates by energy.
+ * One harmonic alone is pulled a fraction of a cent by its neighbours;
+ * the average stays well inside a cent. Returns `rough` when nothing usable
+ * is found or the correction would jump the pitch.
+ */
+function refineFreq(rough: number): number {
+  const len = REFINE_LEN;
+  const hop = REFINE_LEN;
+  const off2 = BUF_LEN - len;
+  const off1 = off2 - hop;
+  if (off1 < 0 || rough <= 0) return rough;
+
+  let bestMag = 0;
+  const later: { mag: number; real: number; imag: number }[] = [];
+  for (let h = 1; h <= 5; h++) {
+    const f = rough * h;
+    if (f >= SAMPLE_RATE * 0.45) { later.push({ mag: 0, real: 0, imag: 0 }); continue; }
+    const g = goertzel(off2, len, f);
+    later.push(g);
+    if (g.mag > bestMag) bestMag = g.mag;
+  }
+  if (bestMag < 1e-8) return rough;
+
+  let acc = 0;
+  let wsum = 0;
+  for (let i = 0; i < later.length; i++) {
+    const g2 = later[i];
+    if (g2.mag < bestMag * 0.02) continue;
+    const h = i + 1;
+    const f = rough * h;
+    const g1 = goertzel(off1, len, f);
+    let err = Math.atan2(g2.imag, g2.real) - Math.atan2(g1.imag, g1.real);
+    err -= (2 * Math.PI * f * hop) / SAMPLE_RATE;
+    while (err > Math.PI) err -= 2 * Math.PI;
+    while (err < -Math.PI) err += 2 * Math.PI;
+    if (Math.abs(err) > 0.6) continue;
+    const fundamental = (f + (err * SAMPLE_RATE) / (2 * Math.PI * hop)) / h;
+    acc += fundamental * g2.mag;
+    wsum += g2.mag;
+  }
+  if (wsum <= 0) return rough;
+
+  const fundamental = acc / wsum;
+  if (fundamental < MIN_FREQ || fundamental > MAX_FREQ) return rough;
+  const cents = 1200 * Math.log2(fundamental / rough);
+  if (!Number.isFinite(cents) || Math.abs(cents) > 15) return rough;
+  return fundamental;
+}
+
 function yin() {
   const start = BUF_LEN - WIN - MAX_LAG;
   diff[0] = 1;
@@ -113,7 +189,7 @@ function yin() {
   const den = a - 2 * b + c;
   if (den > 0) refined = tau + (0.5 * (a - c)) / den;
 
-  yinFreq = SAMPLE_RATE / refined;
+  yinFreq = refineFreq(SAMPLE_RATE / refined);
   yinClarity = 1 - b;
 }
 

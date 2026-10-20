@@ -11,7 +11,7 @@
  *   • 4-card bento becomes a 2 × 2 grid filling the viewport minus the dock
  *   • Card heights are grid-controlled (auto), not fixed 40vh
  *   • ModelViewer, CircularText and the logo are hidden via JSX in App.tsx
- *   • FFT canvas capped at 72px so all Dashboard controls remain visible
+ *   • FFT canvas capped at 72px and the tuner tightened so Dashboard controls stay visible
  *   • RustStreamExample wrapper reset to top:0 / scale:1 (backing track hidden
  *     via .rse-backing-section class added to that div in RustStreamExample.tsx)
  *   • CircularGallery fills its card exactly (no 190% / −20px / 120% offsets)
@@ -50,13 +50,28 @@
 
 /* ═══════════════════════════════════════════════════════════════════════
    CARD 1 — Status / DashboardAudio
-   The 120 px FFT canvas is too tall for a ~196 px card when combined with
-   the note display, buttons and status row. 72 px keeps everything visible.
+   The 120 px FFT canvas and the tuner are too tall for a ~196 px card
+   once the port row and carousel are on screen.
    ═══════════════════════════════════════════════════════════════════════ */
 [data-compact="true"] .magic-bento-card:nth-child(1) canvas,
 [data-compact="true"] .magic-bento-card:nth-child(1) .da-fft-canvas {
   height: 72px !important;
   max-height: 72px !important;
+}
+
+[data-compact="true"] .magic-bento-card:nth-child(1) .da-tuner {
+  height: 132px !important;
+  gap: 3px !important;
+}
+
+[data-compact="true"] .da-tuner-note {
+  font-size: 34px !important;
+}
+
+[data-compact="true"] .da-tuner-string {
+  width: 20px !important;
+  height: 20px !important;
+  font-size: 10px !important;
 }
 
 [data-compact="true"] .magic-bento-card:nth-child(1) .da-metro,

@@ -5,17 +5,17 @@ import DashboardMetronome from "./DashboardMetronome";
 import DashboardChordBank from "./DashboardChordBank";
 import { getLastNote, SAMPLE_RATE, startPitchTracker } from "./pitchTracker";
 import { midiToName } from "./music";
+import DashboardTuner from "./DashboardTuner";
 
 const BUFFER_LEN  = 4096;
 const MAX_DISPLAY_HZ = 4000;
 
-const PANEL_COUNT = 3;
+const PANEL_COUNT = 4;
 const PANEL_W = 300;
 const SWIPE_THRESHOLD = 48;
 
-const PANEL_LABELS = ["FFT", "METRO", "SONGS"];
+const PANEL_LABELS = ["FFT", "SONGS", "METRO", "TUNER"];
 
-// ── FFT helpers ───────────────────────────────────────────────────────────────
 function fft(re: Float32Array, im: Float32Array) {
   const N = re.length;
   for (let i = 0, j = 0; i < N; i++) {
@@ -342,11 +342,15 @@ export default function DashboardAudio({ focused = false }: { focused?: boolean 
           </div>
 
           <div style={{ width: PANEL_W, flexShrink: 0 }}>
+            <DashboardChordBank />
+          </div>
+
+          <div style={{ width: PANEL_W, flexShrink: 0 }}>
             <DashboardMetronome />
           </div>
 
           <div style={{ width: PANEL_W, flexShrink: 0 }}>
-            <DashboardChordBank />
+            <DashboardTuner />
           </div>
         </div>
       </div>
