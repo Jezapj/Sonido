@@ -170,6 +170,33 @@
    MINOR TYPOGRAPHY / SPACING POLISH
    ═══════════════════════════════════════════════════════════════════════ */
 
+[data-compact="true"] .dock-side {
+  margin-bottom: 0;
+}
+
+[data-compact="true"] .dock-side,
+[data-compact="true"] .dock-conn,
+[data-compact="true"] .dock-conn-action {
+  height: 52px !important;
+}
+
+[data-compact="true"] .dock-conn {
+  width: min(240px, 100%);
+  padding: 0 8px 0 10px;
+}
+
+[data-compact="true"] .dock-conn-action {
+  width: min(148px, 100%);
+  padding: 0 12px;
+  font-size: 13px;
+}
+
+[data-compact="true"] .dock-conn select,
+[data-compact="true"] .dock-conn-btn {
+  height: 32px;
+  font-size: 12px;
+}
+
 /* Smaller label so the header wastes less vertical space */
 [data-compact="true"] .magic-bento-card__label {
   font-size: 11px !important;

@@ -603,7 +603,7 @@ export default function RustStreamExample() {
             background: "currentColor",
             animation: connected ? "rse-pulse 1.1s infinite" : "none",
           }} />
-          {connected ? "live" : "idle · connect in Dashboard"}
+          {connected ? "live" : "idle · use Connect"}
         </span>
 
         <button

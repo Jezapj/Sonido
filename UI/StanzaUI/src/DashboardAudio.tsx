@@ -262,16 +262,19 @@ export default function DashboardAudio({ focused = false }: { focused?: boolean 
     }
   }, [ingestChunk, draw]);
 
-  const { ports, selectedPort, setSelectedPort, connected, connect, disconnect, refreshPorts } =
-    useSerialStream(onChunk);
+  const { connected } = useSerialStream(onChunk);
 
-  const handleDisconnect = () => {
+  useEffect(() => {
+    if (connected) return;
     runningRef.current = false;
     cancelAnimationFrame(animRef.current);
     bufferRef.current.fill(0);
     smoothRef.current = new Float32Array(0);
-    disconnect();
-  };
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (canvas && ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+    setNote("—");
+  }, [connected]);
 
   // ── Carousel swipe (loops) ─────────────────────────────────────────────────
   const wrapPage = (p: number) => ((p % PANEL_COUNT) + PANEL_COUNT) % PANEL_COUNT;
@@ -323,57 +326,9 @@ export default function DashboardAudio({ focused = false }: { focused?: boolean 
         ? { position: "relative", margin: "auto", transform: `scale(${zoom})`, flexShrink: 0, color: rootColor }
         : { position: "absolute", bottom: 0, left: 10, color: rootColor }}
     >
-      {!connected ? (
-        <div style={{ width: PANEL_W, marginBottom: 6 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
-            <select
-              value={selectedPort}
-              onChange={e => setSelectedPort(e.target.value)}
-              style={{
-                background: light ? "rgba(0,0,0,0.04)" : "#1a1a2e",
-                color: rootColor,
-                border: light ? "1px solid rgba(0,0,0,0.2)" : "1px solid #444",
-                borderRadius: 6, padding: "4px 8px", fontSize: 12, flex: 1,
-              }}
-            >
-              {ports.length === 0
-                ? <option value="">No ports found</option>
-                : ports.map(p => <option key={p} value={p}>{p}</option>)}
-            </select>
-            <button onClick={refreshPorts} title="Refresh ports" style={{
-              background: "transparent",
-              border: light ? "1px solid rgba(0,0,0,0.25)" : "1px solid #555",
-              color: light ? "rgba(26,15,46,0.55)" : "#aaa",
-              borderRadius: 6, padding: "4px 8px", cursor: "pointer", fontSize: 12,
-            }}>↺</button>
-            <button
-              onClick={connect}
-              disabled={!selectedPort}
-              style={{ ...btnBase, opacity: selectedPort ? 1 : 0.4, padding: "4px 10px" }}
-            >
-              Connect
-            </button>
-          </div>
-        </div>
-      ) : (
-        <>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-            <div style={{ width: 10, height: 10, borderRadius: "50%", background: "lime", flexShrink: 0 }} />
-            <h4 style={{ margin: 0, fontSize: 13, color: rootColor }}>Connected: {selectedPort}</h4>
-            <button
-              onClick={handleDisconnect}
-              style={{ ...btnBase, fontSize: 11, padding: "2px 8px" }}
-            >
-              Disconnect
-            </button>
-          </div>
-        </>
-      )}
-
-      {/* Carousel — available with or without serial */}
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
-        width: PANEL_W, marginBottom: 4, marginTop: connected ? 0 : 2,
+        width: PANEL_W, marginBottom: 4,
       }}>
         <button type="button" onClick={() => goPage(-1)} style={{ ...btnBase }}>‹</button>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>

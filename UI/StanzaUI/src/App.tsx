@@ -6,6 +6,7 @@ import "./CompactLayout.css";
 import FloatingLines from './FloatingLines';
 import { VscHome, VscArchive, VscAccount, VscSettingsGear } from "react-icons/vsc";
 import Dock from './Dock';
+import DockConnection from './DockConnection';
 import ShapeGrid from './ShapeGrid';
 import MagicBento from './MagicBento';
 import ModelViewer from './ModelViewer';
@@ -359,13 +360,15 @@ function App() {
 
       {/* ── Dock — magnification driven by Settings slider ── */}
       {showDock && (
-        <Dock
-          items={items}
-          panelHeight={68}
-          baseItemSize={50}
-          magnification={settings.dockMag}
-          theme={theme}
-        />
+        <DockConnection theme={theme}>
+          <Dock
+            items={items}
+            panelHeight={68}
+            baseItemSize={50}
+            magnification={settings.dockMag}
+            theme={theme}
+          />
+        </DockConnection>
       )}
     </>
   );
