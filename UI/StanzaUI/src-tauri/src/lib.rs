@@ -1,3 +1,5 @@
+mod monitor;
+
 use tauri::Emitter;
 use std::io::{Read, Write};
 use std::sync::Mutex;
@@ -5,9 +7,10 @@ use std::collections::HashMap;
 use tauri::Manager;
 use tauri::Window;
 
-const LOOPER_SAMPLE_RATE: f32 = 47991.0;
-/// Host capture / monitor latency compensation when blending live into the loop.
-const OVERDUB_LATENCY_SECS: f32 = 0.27;
+pub(crate) const LOOPER_SAMPLE_RATE: f32 = 47991.0;
+/// Overdub alignment used until the native monitor is running.
+/// Matches the old Web Audio monitor, which ran about 270 ms late.
+const DEFAULT_OVERDUB_LATENCY_SECS: f32 = 0.27;
 
 // ── Looper state machine ──────────────────────────────────────────────────────
 
@@ -37,6 +40,9 @@ pub struct LoopBuffer {
     /// When false (default), Playing/Overdubbing replace the monitor with
     /// loop-only audio. When true, live input is mixed in alongside the loop.
     pub monitor_live:  bool,
+    /// How far ahead of what the player hears `play_pos` is, in seconds.
+    /// Live overdub samples are written this far earlier in the loop.
+    pub overdub_latency_secs: f32,
 }
 
 impl Default for LoopBuffer {
@@ -49,6 +55,7 @@ impl Default for LoopBuffer {
             mix:          1.0,
             feedback:     0.9,
             monitor_live: false,
+            overdub_latency_secs: DEFAULT_OVERDUB_LATENCY_SECS,
         }
     }
 }
@@ -129,13 +136,13 @@ fn peek_loop_chunk(lb: &LoopBuffer, len: usize) -> Vec<f32> {
 }
 
 /// Blend `live` into the loop buffer (feedback decay) and advance play_pos.
-/// Live samples are written `OVERDUB_LATENCY_SECS` earlier in the loop so the
+/// Live samples are written `overdub_latency_secs` earlier in the loop so the
 /// overdub aligns with playback despite host capture/monitor latency.
 fn overdub_and_advance(lb: &mut LoopBuffer, live: &[i16]) {
     if lb.loop_len == 0 {
         return;
     }
-    let latency = ((OVERDUB_LATENCY_SECS * LOOPER_SAMPLE_RATE) as usize) % lb.loop_len;
+    let latency = ((lb.overdub_latency_secs * LOOPER_SAMPLE_RATE) as usize) % lb.loop_len;
     let len = live.len().min(lb.loop_len);
     for i in 0..len {
         // play_pos - latency (wrapped): place the overdub earlier in the loop
@@ -289,8 +296,9 @@ async fn looper_clear(app: tauri::AppHandle) -> Result<LooperInfo, String> {
     {
         let state = app.state::<LoopState>();
         let mut lb = state.0.lock().map_err(|e| e.to_string())?;
-        let (mix, feedback, monitor_live) = (lb.mix, lb.feedback, lb.monitor_live);
-        *lb = LoopBuffer { mix, feedback, monitor_live, ..LoopBuffer::default() };
+        let (mix, feedback, monitor_live, overdub_latency_secs) =
+            (lb.mix, lb.feedback, lb.monitor_live, lb.overdub_latency_secs);
+        *lb = LoopBuffer { mix, feedback, monitor_live, overdub_latency_secs, ..LoopBuffer::default() };
         info = snapshot(&lb);
     }
     let _ = app.emit("looper_info", info.clone());
@@ -363,8 +371,9 @@ async fn stream_audio(app: tauri::AppHandle) {
 /// Open a serial port and stream audio.
 ///
 /// Architecture: the ESP32 sends processed audio to the host one-way.
-/// The looper buffer lives on the host and plays back through the GUI
-/// live monitor (`audio_chunk`) only:
+/// The looper buffer lives on the host. `chunk_f32` is what the monitor
+/// should hear: it is pushed to the native output and emitted as
+/// `audio_chunk` for visuals and pitch tracking.
 ///   - Recording   → append i16 samples; monitor stays live
 ///   - Playing     → loop into monitor (optionally mute live via monitor_live)
 ///   - Overdubbing → same monitor behaviour + overdub into buffer
@@ -450,6 +459,9 @@ async fn stream_audio_serial(app: tauri::AppHandle, port_name: String, baud_rate
                         let _ = app.emit("looper_info", info);
                     }
 
+                    // Same samples the visuals receive. Playback is native; the
+                    // event stays for waveforms, pitch tracking, and the UI.
+                    app.state::<monitor::NativeMonitor>().push(&chunk_f32);
                     let _ = app.emit("audio_chunk", &chunk_f32);
                 }
 
@@ -489,6 +501,45 @@ async fn update_dsp_params(
         }
     }
     write_packet(&app, &build_param_packet(pedal_id, enabled, &send_params))
+}
+
+/// Play the live monitor through the default output device.
+/// While this is on, overdub alignment uses the measured native latency
+/// instead of the old Web Audio delay.
+#[tauri::command]
+async fn set_native_monitor(app: tauri::AppHandle, enabled: bool, epoch: u64) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mon = app.state::<monitor::NativeMonitor>();
+        mon.set_enabled(
+            epoch,
+            enabled,
+            |latency| {
+                if let Ok(mut lb) = app.state::<LoopState>().0.lock() {
+                    lb.overdub_latency_secs = latency;
+                }
+            },
+            || {
+                if let Ok(mut lb) = app.state::<LoopState>().0.lock() {
+                    lb.overdub_latency_secs = DEFAULT_OVERDUB_LATENCY_SECS;
+                }
+            },
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Guitar level into the native monitor. The backing track stays in the webview.
+#[tauri::command]
+fn set_monitor_gain(app: tauri::AppHandle, gain: f32) {
+    app.state::<monitor::NativeMonitor>().set_gain(gain);
+}
+
+/// Serial-capture chunk + ring target + output-device buffer, in seconds.
+/// Zero until the native monitor has been started at least once.
+#[tauri::command]
+fn get_monitor_latency(app: tauri::AppHandle) -> f32 {
+    app.state::<monitor::NativeMonitor>().latency_secs()
 }
 
 /// Silence / restore the ESP32 DAC path by zeroing EQ pre_gain (pedal id 1).
@@ -555,6 +606,7 @@ pub fn run() {
             saved_pregain: Mutex::new(1.0),
         })
         .manage(LoopState(Mutex::new(LoopBuffer::default())))
+        .manage(monitor::NativeMonitor::new())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             greet,
@@ -563,6 +615,9 @@ pub fn run() {
             stream_audio_serial,
             update_dsp_params,
             set_output_mute,
+            set_native_monitor,
+            set_monitor_gain,
+            get_monitor_latency,
             toggle_fullscreen,
             looper_tap,
             looper_stop,

@@ -123,15 +123,13 @@ export default function RustStreamExample() {
 
   useEffect(() => { startPitchTracker(); }, []);
 
-  // ── Shared Web Audio context ────────────────────────────────────────────────
+  // ── Shared Web Audio context (backing track only) ─────────────────────────
   const actxRef  = useRef<AudioContext | null>(null);
-  const gGainRef = useRef<GainNode | null>(null);   // guitar output gain
   const bGainRef = useRef<GainNode | null>(null);   // backing output gain
-  const gNextRef = useRef(0);                        // guitar schedule head
 
-  // ── Guitar monitor ─────────────────────────────────────────────────────────
+  // ── Guitar monitor (played natively in Rust) ───────────────────────────────
   const [monOn, setMonOn] = useState(false);
-  const monRef  = useRef(false);
+  const monitorEpoch = useRef(0);
 
   // ── Hardware DAC mute ──────────────────────────────────────────────────────
   const [hwMuted, setHwMuted] = useState(false);
@@ -165,49 +163,32 @@ export default function RustStreamExample() {
   const ensureCtx = useCallback((): AudioContext => {
     if (actxRef.current && actxRef.current.state !== "closed") return actxRef.current;
     const ctx = new AudioContext({ sampleRate: FS });
-    const gg = ctx.createGain();
     const bg = ctx.createGain();
-    gg.gain.value = 1 - mixRef.current;
     bg.gain.value = mixRef.current;
-    gg.connect(ctx.destination);
     bg.connect(ctx.destination);
-    gGainRef.current = gg;
     bGainRef.current = bg;
     actxRef.current  = ctx;
-    gNextRef.current = 0;
     return ctx;
   }, []);
 
-  // Keep gain nodes in sync with mix slider
+  // Backing stays in Web Audio. Guitar monitor gain is applied in Rust.
   useEffect(() => {
     mixRef.current = mix;
-    if (gGainRef.current) gGainRef.current.gain.value = 1 - mix;
     if (bGainRef.current) bGainRef.current.gain.value = mix;
+    void invoke("set_monitor_gain", { gain: 1 - mix });
   }, [mix]);
 
-  // Keep monitor ref in sync
+  // Native output. `epoch` lets a slow start lose to a later toggle.
+  // Disconnect already clears monOn, which turns this off.
   useEffect(() => {
-    monRef.current = monOn;
-    if (!monOn) gNextRef.current = 0;
+    const epoch = ++monitorEpoch.current;
+    let cancelled = false;
+    void invoke("set_native_monitor", { enabled: monOn, epoch }).catch((e) => {
+      console.warn("[RustStreamExample] set_native_monitor failed:", e);
+      if (monOn && !cancelled && epoch === monitorEpoch.current) setMonOn(false);
+    });
+    return () => { cancelled = true; };
   }, [monOn]);
-
-  // ── Guitar monitor scheduling ──────────────────────────────────────────────
-
-  const scheduleGuitarChunk = useCallback((samples: number[]) => {
-    if (!monRef.current) return;
-    const ctx = ensureCtx();
-    if (ctx.state === "suspended") ctx.resume();
-    const ab = ctx.createBuffer(1, samples.length, FS);
-    ab.getChannelData(0).set(new Float32Array(samples));
-    const src = ctx.createBufferSource();
-    src.buffer = ab;
-    src.connect(gGainRef.current!);
-    const now = ctx.currentTime;
-    if (gNextRef.current > now + 0.3) gNextRef.current = now + 0.05;
-    const at = Math.max(gNextRef.current, now + 0.02);
-    src.start(at);
-    gNextRef.current = at + ab.duration;
-  }, [ensureCtx]);
 
   // ── Guitar waveform draw loop ──────────────────────────────────────────────
 
@@ -270,8 +251,7 @@ export default function RustStreamExample() {
 
   const onChunk = useCallback((samples: number[]) => {
     ingestGuitar(samples);
-    scheduleGuitarChunk(samples);
-  }, [ingestGuitar, scheduleGuitarChunk]);
+  }, [ingestGuitar]);
 
   // ── Serial stream controls ─────────────────────────────────────────────────
 
@@ -487,6 +467,7 @@ export default function RustStreamExample() {
     cancelAnimationFrame(gAnimRef.current);
     cancelAnimationFrame(bAnimRef.current);
     if (bSrcRef.current) { try { bSrcRef.current.stop(); } catch { /**/ } }
+    void invoke("set_native_monitor", { enabled: false, epoch: ++monitorEpoch.current });
     actxRef.current?.close();
   }, []);
 
