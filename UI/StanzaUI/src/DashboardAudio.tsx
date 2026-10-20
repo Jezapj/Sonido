@@ -10,6 +10,25 @@ import DashboardTuner from "./DashboardTuner";
 const BUFFER_LEN  = 4096;
 const MAX_DISPLAY_HZ = 4000;
 
+type FftRes = "low" | "normal" | "high";
+type FftPace = "fast" | "normal" | "slow";
+
+/** Displayed bars. High keeps one bar per FFT bin, which is the original view. */
+const RES_BARS: Record<FftRes, number | null> = { low: 24, normal: 72, high: null };
+/** How quickly a bar chases the new magnitude. Fast is the original, unsmoothed draw. */
+const PACE_ALPHA: Record<FftPace, number> = { fast: 1, normal: 0.22, slow: 0.07 };
+
+const RES_OPTIONS: { id: FftRes; label: string }[] = [
+  { id: "low", label: "LOW" },
+  { id: "normal", label: "NORMAL" },
+  { id: "high", label: "HIGH" },
+];
+const PACE_OPTIONS: { id: FftPace; label: string }[] = [
+  { id: "fast", label: "FAST" },
+  { id: "normal", label: "NORMAL" },
+  { id: "slow", label: "SLOW" },
+];
+
 const PANEL_COUNT = 4;
 const PANEL_W = 300;
 const SWIPE_THRESHOLD = 48;
@@ -63,6 +82,51 @@ const btnBaseLight: React.CSSProperties = {
   color: "#1a0f2e",
 };
 
+function FftOptionRow<T extends string>({
+  caption, value, options, onChange, btnBase, accent, light,
+}: {
+  caption: string;
+  value: T;
+  options: { id: T; label: string }[];
+  onChange: (id: T) => void;
+  btnBase: React.CSSProperties;
+  accent: string;
+  light: boolean;
+}) {
+  return (
+    <div className="da-fft-opt">
+      <span className="da-label">{caption}</span>
+      <div className="da-fft-opt-btns">
+        {options.map(opt => {
+          const on = opt.id === value;
+          return (
+            <button
+              key={opt.id}
+              type="button"
+              className={on ? "is-on" : undefined}
+              onClick={() => onChange(opt.id)}
+              style={{
+                ...btnBase,
+                flex: 1,
+                padding: "3px 0",
+                fontSize: 10,
+                fontWeight: on ? 700 : 500,
+                borderColor: on ? accent : undefined,
+                color: on ? accent : undefined,
+                background: on
+                  ? (light ? "rgba(109,40,217,0.12)" : "rgba(175,169,236,0.2)")
+                  : "transparent",
+              }}
+            >
+              {opt.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 export default function DashboardAudio({ focused = false }: { focused?: boolean }) {
   const light = useIsLightMode();
@@ -73,9 +137,16 @@ export default function DashboardAudio({ focused = false }: { focused?: boolean 
 
   const canvasRef   = useRef<HTMLCanvasElement>(null);
   const bufferRef   = useRef<Float32Array>(new Float32Array(BUFFER_LEN));
+  const smoothRef   = useRef<Float32Array>(new Float32Array(0));
   const animRef     = useRef(0);
   const runningRef  = useRef(false);
   const [note, setNote] = useState("—");
+  const [fftRes, setFftRes] = useState<FftRes>("high");
+  const [fftPace, setFftPace] = useState<FftPace>("fast");
+  const fftResRef = useRef(fftRes);
+  const fftPaceRef = useRef(fftPace);
+  useEffect(() => { fftResRef.current = fftRes; }, [fftRes]);
+  useEffect(() => { fftPaceRef.current = fftPace; }, [fftPace]);
 
   useEffect(() => { startPitchTracker(); }, []);
 
@@ -145,6 +216,23 @@ export default function DashboardAudio({ focused = false }: { focused?: boolean 
       mags.length,
       Math.ceil(MAX_DISPLAY_HZ * BUFFER_LEN / SAMPLE_RATE),
     );
+    const cap = RES_BARS[fftResRef.current];
+    const bars = cap == null ? displayBins : Math.min(displayBins, cap);
+    const alpha = PACE_ALPHA[fftPaceRef.current];
+
+    let shown = smoothRef.current;
+    if (shown.length !== bars) {
+      shown = new Float32Array(bars);
+      smoothRef.current = shown;
+    }
+    for (let b = 0; b < bars; b++) {
+      const start = Math.floor(b * displayBins / bars);
+      const end = Math.max(start + 1, Math.floor((b + 1) * displayBins / bars));
+      let sum = 0;
+      for (let i = start; i < end; i++) sum += mags[i];
+      const target = sum / (end - start);
+      shown[b] = shown[b] + alpha * (target - shown[b]);
+    }
 
     ctx.clearRect(0, 0, W, H);
 
@@ -155,11 +243,12 @@ export default function DashboardAudio({ focused = false }: { focused?: boolean 
       ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
     }
 
-    const barWidth = W / displayBins;
-    for (let i = 0; i < displayBins; i++) {
-      const h = (mags[i] / 50) * H;
+    const barWidth = W / bars;
+    const gap = cap == null ? 0 : 1;
+    for (let i = 0; i < bars; i++) {
+      const h = (shown[i] / 50) * H;
       ctx.fillStyle = "#00ffcc";
-      ctx.fillRect(i * barWidth, H - h, barWidth, h);
+      ctx.fillRect(i * barWidth, H - h, Math.max(barWidth - gap, 1), h);
     }
 
     if (runningRef.current) animRef.current = requestAnimationFrame(draw);
@@ -180,6 +269,7 @@ export default function DashboardAudio({ focused = false }: { focused?: boolean 
     runningRef.current = false;
     cancelAnimationFrame(animRef.current);
     bufferRef.current.fill(0);
+    smoothRef.current = new Float32Array(0);
     disconnect();
   };
 
@@ -336,9 +426,27 @@ export default function DashboardAudio({ focused = false }: { focused?: boolean 
         >
           <div style={{ width: PANEL_W, flexShrink: 0 }}>
             <canvas ref={canvasRef} width={Math.round(300 * fftScale)} height={Math.round(120 * fftScale)} className="da-fft-canvas" style={{ width: 300, height: 120 }} />
-            <div className="da-accent" style={{ marginTop: 10, fontSize: 30, fontWeight: "bold", color: accent }}>
+            <div className="da-accent" style={{ marginTop: 6, fontSize: 30, fontWeight: "bold", color: accent, lineHeight: 1 }}>
               {note}
             </div>
+            <FftOptionRow
+              caption="RESOLUTION"
+              value={fftRes}
+              options={RES_OPTIONS}
+              onChange={setFftRes}
+              btnBase={btnBase}
+              accent={accent}
+              light={light}
+            />
+            <FftOptionRow
+              caption="RESPONSE"
+              value={fftPace}
+              options={PACE_OPTIONS}
+              onChange={setFftPace}
+              btnBase={btnBase}
+              accent={accent}
+              light={light}
+            />
           </div>
 
           <div style={{ width: PANEL_W, flexShrink: 0 }}>

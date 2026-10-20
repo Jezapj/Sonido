@@ -81,7 +81,21 @@
 }
 
 [data-compact="true"] .magic-bento-card:nth-child(1) .da-carousel {
-  max-height: 150px;
+  max-height: 168px;
+}
+
+[data-compact="true"] .da-fft-opt {
+  margin-top: 3px !important;
+}
+
+[data-compact="true"] .da-fft-opt .da-label {
+  width: 72px;
+  font-size: 8px !important;
+}
+
+[data-compact="true"] .da-fft-opt button {
+  padding: 1px 0 !important;
+  font-size: 9px !important;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════

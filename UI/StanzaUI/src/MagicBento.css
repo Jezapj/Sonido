@@ -270,6 +270,13 @@
   justify-content: center;
 }
 
+/* Unfocused dashboard: give the tools a real box under the label.
+   Otherwise the absolute panel anchors at the top and covers "Dashboard". */
+.magic-bento-card:not(.magic-bento-card--focused) .magic-bento-card__content:has(.da-wrap) {
+  flex: 1;
+  min-height: 0;
+}
+
 /* Gallery wrapper is no longer scaled, so the overlay is viewport-fixed again */
 .magic-bento-card--focused .po-overlay {
   top: 0 !important;
@@ -475,6 +482,35 @@
 [data-theme="light"] .da-song-title,
 [data-theme="light"] .da-songs-count {
   color: #000000 !important;
+}
+
+.da-fft-opt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.da-fft-opt .da-label {
+  font-family: monospace;
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  width: 78px;
+  flex-shrink: 0;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.da-fft-opt-btns {
+  display: flex;
+  flex: 1;
+  gap: 4px;
+  min-width: 0;
+}
+
+[data-theme="light"] .da-root .da-fft-opt button.is-on {
+  color: #6d28d9 !important;
+  border-color: rgba(109, 40, 217, 0.55) !important;
+  background: rgba(109, 40, 217, 0.12) !important;
 }
 
 /* Kill global App.css button shadows inside dashboard tools (keep range input shadow) */
