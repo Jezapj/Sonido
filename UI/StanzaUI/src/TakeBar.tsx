@@ -7,17 +7,50 @@ import {
 
 const REC = "#ef4444";
 
-/** Record button, the unsaved take, and the loaded guide take (above Bars / Score). */
-export default function TakeBar({ connected }: { connected: boolean }) {
-  const t = useTakes();
-  const light = useIsLightMode();
+/** Re-render every 250 ms while `active` (recording timer, guide score). */
+function useTicker(active: boolean) {
   const [, setTick] = useState(0);
-
   useEffect(() => {
-    if (!t.recording && !t.guidePlaying) return;
+    if (!active) return;
     const id = setInterval(() => setTick(n => n + 1), 250);
     return () => clearInterval(id);
-  }, [t.recording, t.guidePlaying]);
+  }, [active]);
+}
+
+/** Record / stop button; `base` matches the surrounding header buttons. */
+export function RecButton({ connected, base }: { connected: boolean; base: React.CSSProperties }) {
+  const t = useTakes();
+  useTicker(t.recording);
+  const off = !connected && !t.recording;
+  return (
+    <button
+      type="button"
+      onClick={() => (t.recording ? endRecording() : beginRecording())}
+      disabled={off}
+      title={t.recording ? "Stop recording" : "Record the notes you play"}
+      style={{
+        ...base,
+        opacity: off ? 0.4 : 1,
+        borderColor: t.recording ? REC : "rgba(239,68,68,0.45)",
+        color: REC,
+        background: t.recording ? "rgba(239,68,68,0.14)" : "transparent",
+        display: "inline-flex", alignItems: "center", gap: 6,
+      }}
+    >
+      <span style={{
+        width: 8, height: 8, borderRadius: t.recording ? 1 : "50%", background: REC,
+        animation: t.recording ? "rse-pulse 1.1s infinite" : "none",
+      }} />
+      {t.recording ? `STOP ${fmtDuration(performance.now() - t.recordStartedAt)}` : "REC"}
+    </button>
+  );
+}
+
+/** The unsaved take and the loaded guide take (above Bars / Score). */
+export default function TakeBar() {
+  const t = useTakes();
+  const light = useIsLightMode();
+  useTicker(t.guidePlaying);
 
   const ink = light ? "rgba(26,15,46,0.75)" : "rgba(255,255,255,0.75)";
   const dim = light ? "rgba(26,15,46,0.45)" : "rgba(255,255,255,0.4)";
@@ -37,34 +70,15 @@ export default function TakeBar({ connected }: { connected: boolean }) {
   };
 
   const score = t.guide ? guideScore() : null;
+  const showPending = !!t.pending && !t.recording;
+  if (!showPending && !t.guide) return null;
 
   return (
     <div style={{
       display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap",
       rowGap: 4, marginBottom: 5, minHeight: 22,
     }}>
-      <button
-        type="button"
-        onClick={() => (t.recording ? endRecording() : beginRecording())}
-        disabled={!connected && !t.recording}
-        title={t.recording ? "Stop recording" : "Record the notes you play"}
-        style={{
-          ...btn,
-          opacity: !connected && !t.recording ? 0.4 : 1,
-          borderColor: t.recording ? REC : "rgba(239,68,68,0.45)",
-          color: REC,
-          background: t.recording ? "rgba(239,68,68,0.14)" : "transparent",
-          display: "inline-flex", alignItems: "center", gap: 5,
-        }}
-      >
-        <span style={{
-          width: 7, height: 7, borderRadius: t.recording ? 1 : "50%", background: REC,
-          animation: t.recording ? "rse-pulse 1.1s infinite" : "none",
-        }} />
-        {t.recording ? `STOP ${fmtDuration(performance.now() - t.recordStartedAt)}` : "REC"}
-      </button>
-
-      {t.pending && !t.recording && (
+      {showPending && t.pending && (
         <div style={{ display: "flex", alignItems: "center", gap: 5, minWidth: 0 }}>
           <span style={{ ...chip, color: accent }}>
             TAKE {fmtDuration(t.pending.durationMs)} · {t.pending.notes.length} notes

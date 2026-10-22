@@ -55,7 +55,7 @@ const LIGHT: Palette = {
 };
 
 /** Where the play line sits when a guide take is loaded (fraction of width). */
-const GUIDE_LINE_FRAC = 0.6;
+const GUIDE_LINE_FRAC = 0.25;
 
 const guideColor = (p: Palette, i: number) => {
   const j = guideJudgement(i);
@@ -140,7 +140,7 @@ export function NoteBarsView({ active }: { active: boolean }) {
     if (guide) judgeGuide(notes, now);
 
     const nowX = guide ? Math.round(w * GUIDE_LINE_FRAC) : w - 10;
-    const pps = nowX / BAR_VISIBLE_SECS;
+    const pps = (guide ? w : nowX) / BAR_VISIBLE_SECS;
     const horizon = now - BAR_VISIBLE_SECS * 1000;
 
     const visible: NoteEvent[] = [];
@@ -175,14 +175,14 @@ export function NoteBarsView({ active }: { active: boolean }) {
       r.hi += (hi - r.hi) * 0.08;
     }
 
-    const padTop = 16, padBot = 8;
+    const padTop = 20, padBot = 12;
     const rowH = (h - padTop - padBot) / (r.hi - r.lo);
     const yOf = (m: number) => padTop + (r.hi - m) * rowH;
 
     // Semitone grid
     const labelAll = rowH >= 10;
     ctx.lineWidth = 0.5;
-    ctx.font = "9px monospace";
+    ctx.font = "11px monospace";
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
     const labels: [string, number][] = [];
@@ -204,7 +204,7 @@ export function NoteBarsView({ active }: { active: boolean }) {
     ctx.beginPath(); ctx.moveTo(nowX, 0); ctx.lineTo(nowX, h); ctx.stroke();
 
     const barH = clamp(rowH * 0.72, 4, 18);
-    const fs = clamp(barH * 0.75, 8, 11);
+    const fs = clamp(barH * 0.95, 11, 15);
 
     // Guide bars (outlined, label underneath so it doesn't collide with live labels)
     ctx.font = `600 ${fs}px monospace`;
@@ -265,7 +265,7 @@ export function NoteBarsView({ active }: { active: boolean }) {
       ctx.shadowBlur = 0;
     }
 
-    ctx.font = "9px monospace";
+    ctx.font = "11px monospace";
     ctx.textBaseline = "middle";
     ctx.fillStyle = p.dim;
     for (const [t, y] of labels) ctx.fillText(t, 4, y);

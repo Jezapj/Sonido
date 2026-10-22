@@ -4,7 +4,7 @@ import { useSerialStream } from "./useSerialStream";
 import { useIsLightMode } from "./UseTheme";
 import { resetPitchTracker, startPitchTracker } from "./pitchTracker";
 import { NoteBarsView, NotationView, type NotationMode } from "./NoteViews";
-import TakeBar from "./TakeBar";
+import TakeBar, { RecButton } from "./TakeBar";
 import { useTakes } from "./takes";
 
 const GUITAR_BUF = 1024;
@@ -611,6 +611,8 @@ export default function RustStreamExample() {
           {connected ? "live" : "idle · use Connect"}
         </span>
 
+        <RecButton connected={connected} base={btn} />
+
         <button
           onClick={() => setMonOn(v => !v)}
           disabled={!connected}
@@ -650,7 +652,7 @@ export default function RustStreamExample() {
         </div>
       </div>
 
-      <TakeBar connected={connected} />
+      <TakeBar />
 
       {/* ── Swappable views: waveform+stats / bars / score ─────────────────── */}
       <div

@@ -141,8 +141,8 @@ export default function DashboardAudio({ focused = false }: { focused?: boolean 
   const animRef     = useRef(0);
   const runningRef  = useRef(false);
   const [note, setNote] = useState("—");
-  const [fftRes, setFftRes] = useState<FftRes>("high");
-  const [fftPace, setFftPace] = useState<FftPace>("fast");
+  const [fftRes, setFftRes] = useState<FftRes>("normal");
+  const [fftPace, setFftPace] = useState<FftPace>("normal");
   const fftResRef = useRef(fftRes);
   const fftPaceRef = useRef(fftPace);
   useEffect(() => { fftResRef.current = fftRes; }, [fftRes]);
