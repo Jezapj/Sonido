@@ -41,6 +41,7 @@ export interface NoteEvent {
   end: number | null;     // null while still sounding
   string: number | null;  // 0 = low E … 5 = high e
   fret: number | null;
+  peak: number;           // peak RMS while sounding (for velocity)
 }
 
 export interface PitchFrame {
@@ -77,6 +78,9 @@ let noiseFloor = 0.002;
 
 let fingering = newFingeringState();
 let started = false;
+
+let recording: NoteEvent[] | null = null;
+let recordStart = 0;
 
 // ── YIN ───────────────────────────────────────────────────────────────────────
 
@@ -205,9 +209,10 @@ function startNote(midi: number, t: number, rms: number) {
   const f = assignFingering(midi, fingering);
   const n: NoteEvent = {
     id: nextId++, midi, start: t, end: null,
-    string: f?.string ?? null, fret: f?.fret ?? null,
+    string: f?.string ?? null, fret: f?.fret ?? null, peak: rms,
   };
   notes.push(n);
+  recording?.push(n);
   if (notes.length > MAX_NOTES) notes = notes.slice(-MAX_NOTES);
   active = n;
   lastNote = n;
@@ -246,6 +251,7 @@ function analyse() {
 
   if (active) {
     activePeakRms = Math.max(activePeakRms, rms);
+    active.peak = activePeakRms;
     if (!voiced || rms < activePeakRms * RELEASE_RATIO) {
       if (++unvoicedFrames >= RELEASE_FRAMES) endActive(lastVoicedTime);
     } else {
@@ -313,3 +319,23 @@ export const getActiveNote = (): NoteEvent | null => active;
 export const getLastNote = (): NoteEvent | null => lastNote;
 /** Increments on every reset so views can drop cached layout. */
 export const getTrackerEpoch = (): number => epoch;
+
+// ── Recording ─────────────────────────────────────────────────────────────────
+// Kept separately from `notes` so it is neither capped by MAX_NOTES nor
+// cleared by resetPitchTracker().
+
+export const isRecording = (): boolean => recording !== null;
+
+export function startRecording() {
+  recording = [];
+  recordStart = performance.now();
+}
+
+/** Ends the recording; notes still sounding are closed at the stop time. */
+export function stopRecording(): { notes: NoteEvent[]; start: number; end: number } | null {
+  if (!recording) return null;
+  const end = performance.now();
+  const out = recording.map(n => ({ ...n, end: n.end ?? end }));
+  recording = null;
+  return { notes: out, start: recordStart, end };
+}

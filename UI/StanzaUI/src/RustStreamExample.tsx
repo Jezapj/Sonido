@@ -4,6 +4,8 @@ import { useSerialStream } from "./useSerialStream";
 import { useIsLightMode } from "./UseTheme";
 import { resetPitchTracker, startPitchTracker } from "./pitchTracker";
 import { NoteBarsView, NotationView, type NotationMode } from "./NoteViews";
+import TakeBar from "./TakeBar";
+import { useTakes } from "./takes";
 
 const GUITAR_BUF = 1024;
 const FS = 47991;
@@ -122,6 +124,9 @@ export default function RustStreamExample() {
   const dragStartX = useRef(0);
 
   useEffect(() => { startPitchTracker(); }, []);
+
+  const { guide } = useTakes();
+  useEffect(() => { if (guide) setView(v => (v === 0 ? 1 : v)); }, [guide]);
 
   // ── Shared Web Audio context (backing track only) ─────────────────────────
   const actxRef  = useRef<AudioContext | null>(null);
@@ -644,6 +649,8 @@ export default function RustStreamExample() {
         </button>
         </div>
       </div>
+
+      <TakeBar connected={connected} />
 
       {/* ── Swappable views: waveform+stats / bars / score ─────────────────── */}
       <div

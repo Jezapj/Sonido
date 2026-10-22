@@ -1,4 +1,8 @@
 import { useCallback, useEffect, useRef, useState, FC } from "react";
+import {
+  claimPending, exportTakeMidi, fmtDuration, loadGuide, midiToTake, unloadGuide, useTakes,
+  type Take,
+} from "./takes";
 
 export type ChordVerse = {
   label: string;
@@ -11,6 +15,7 @@ export type Song = {
   key: string;
   verses: ChordVerse[];
   folderId: string | null;
+  takes: Take[];
 };
 
 export type SongFolder = {
@@ -71,7 +76,7 @@ const fieldStyle: React.CSSProperties = {
 };
 
 function normalizeSong(s: Song): Song {
-  return { ...s, folderId: s.folderId ?? null };
+  return { ...s, folderId: s.folderId ?? null, takes: Array.isArray(s.takes) ? s.takes : [] };
 }
 
 function loadBank(): BankStore {
@@ -91,7 +96,11 @@ function loadBank(): BankStore {
 }
 
 function saveBank(store: BankStore) {
-  localStorage.setItem(LS_KEY, JSON.stringify(store));
+  try {
+    localStorage.setItem(LS_KEY, JSON.stringify(store));
+  } catch (e) {
+    console.warn("[ChordBank] could not save songs (storage full?):", e);
+  }
 }
 
 /**
@@ -174,10 +183,54 @@ const DashboardChordBank: FC = () => {
 
   const active = songs.find(s => s.id === activeId) ?? null;
 
+  const takeStore = useTakes();
+  const [viewTab, setViewTab] = useState<"chords" | "takes">("chords");
+  const [renamingTake, setRenamingTake] = useState<{ id: string; name: string } | null>(null);
+  const [takeError, setTakeError] = useState("");
+  const midiInputRef = useRef<HTMLInputElement>(null);
+
   const openSong = useCallback((id: string) => {
     setActiveId(id);
+    setViewTab("chords");
+    setTakeError("");
     setMode("view");
   }, []);
+
+  const updateTakes = useCallback((songId: string, fn: (takes: Take[]) => Take[]) => {
+    setSongs(prev => prev.map(s => s.id === songId ? { ...s, takes: fn(s.takes) } : s));
+  }, []);
+
+  const saveTakeToSong = useCallback(() => {
+    if (!active) return;
+    const take = claimPending(`Take ${active.takes.length + 1}`);
+    if (take) updateTakes(active.id, ts => [...ts, take]);
+  }, [active, updateTakes]);
+
+  const importMidi = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !active) return;
+    try {
+      const take = midiToTake(new Uint8Array(await file.arrayBuffer()), file.name.replace(/\.midi?$/i, ""));
+      updateTakes(active.id, ts => [...ts, take]);
+      setTakeError("");
+    } catch (err) {
+      setTakeError(err instanceof Error ? err.message : "Could not read that MIDI file");
+    }
+  }, [active, updateTakes]);
+
+  const deleteTake = useCallback((take: Take) => {
+    if (!active) return;
+    if (takeStore.guide?.id === take.id) unloadGuide();
+    updateTakes(active.id, ts => ts.filter(t => t.id !== take.id));
+  }, [active, takeStore.guide, updateTakes]);
+
+  const commitRename = useCallback(() => {
+    if (!active || !renamingTake) return;
+    const name = renamingTake.name.trim();
+    if (name) updateTakes(active.id, ts => ts.map(t => t.id === renamingTake.id ? { ...t, name } : t));
+    setRenamingTake(null);
+  }, [active, renamingTake, updateTakes]);
 
   const startNew = useCallback(() => {
     setActiveId(null);
@@ -204,6 +257,7 @@ const DashboardChordBank: FC = () => {
       key: songKey.trim(),
       verses,
       folderId: songs.find(s => s.id === activeId)?.folderId ?? null,
+      takes: songs.find(s => s.id === activeId)?.takes ?? [],
     };
     setSongs(prev => {
       const idx = prev.findIndex(s => s.id === entry.id);
@@ -586,6 +640,152 @@ const DashboardChordBank: FC = () => {
         </button>
       </div>
 
+      <div style={{ display: "flex" }}>
+        {(["chords", "takes"] as const).map((t, i) => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => setViewTab(t)}
+            style={{
+              ...btnBase,
+              flex: 1, fontSize: 9, letterSpacing: "0.1em", padding: "2px 0",
+              borderRadius: i === 0 ? "7px 0 0 7px" : "0 7px 7px 0",
+              marginLeft: i === 0 ? 0 : -0.5,
+              borderColor: viewTab === t ? "rgba(175,169,236,0.6)" : "rgba(255,255,255,0.18)",
+              color: viewTab === t ? "#AFA9EC" : "rgba(255,255,255,0.5)",
+              background: viewTab === t ? "rgba(175,169,236,0.12)" : "transparent",
+            }}
+          >
+            {t === "chords" ? "CHORDS" : `TAKES (${active.takes.length})`}
+          </button>
+        ))}
+      </div>
+
+      {viewTab === "takes" ? (
+        <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", gap: 4 }}>
+          <div style={{ display: "flex", gap: 5 }}>
+            <button
+              type="button"
+              onClick={saveTakeToSong}
+              disabled={!takeStore.pending}
+              title={takeStore.pending ? "Save the last recording into this song" : "Press REC above the note views first"}
+              style={{
+                ...btnBase, flex: 1, padding: "3px 0",
+                borderColor: "rgba(175,169,236,0.55)", color: "#AFA9EC",
+                background: "rgba(175,169,236,0.1)",
+                opacity: takeStore.pending ? 1 : 0.4,
+              }}
+            >
+              + SAVE TAKE{takeStore.pending ? ` (${fmtDuration(takeStore.pending.durationMs)})` : ""}
+            </button>
+            <button
+              type="button"
+              onClick={() => midiInputRef.current?.click()}
+              title="Import a .mid file as a take"
+              style={{ ...btnBase, padding: "3px 8px" }}
+            >
+              IMPORT
+            </button>
+            <input
+              ref={midiInputRef}
+              type="file"
+              accept=".mid,.midi,audio/midi"
+              style={{ display: "none" }}
+              onChange={importMidi}
+            />
+          </div>
+          {takeError && (
+            <div style={{ fontFamily: "monospace", fontSize: 9, color: "#ef4444" }}>{takeError}</div>
+          )}
+          <div className="da-songs-scroll" style={{
+            flex: 1, overflowY: "auto", minHeight: 0,
+            display: "flex", flexDirection: "column", gap: 3,
+            paddingRight: 2, boxShadow: "none",
+          }}>
+            {active.takes.map(tk => {
+              const loaded = takeStore.guide?.id === tk.id;
+              return (
+                <div
+                  key={tk.id}
+                  className="da-song-row"
+                  style={{
+                    display: "flex", alignItems: "center", gap: 5,
+                    padding: "3px 4px 3px 8px", borderRadius: 8,
+                    border: loaded ? "0.5px solid rgba(245,185,113,0.7)" : "0.5px solid rgba(255,255,255,0.14)",
+                    background: loaded ? "rgba(245,185,113,0.1)" : "rgba(255,255,255,0.03)",
+                  }}
+                >
+                  {renamingTake?.id === tk.id ? (
+                    <input
+                      autoFocus
+                      value={renamingTake.name}
+                      onChange={e => setRenamingTake({ id: tk.id, name: e.target.value })}
+                      onBlur={commitRename}
+                      onKeyDown={e => {
+                        if (e.key === "Enter") commitRename();
+                        if (e.key === "Escape") setRenamingTake(null);
+                      }}
+                      style={{ ...fieldStyle, flex: 1, padding: "2px 6px" }}
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => (loaded ? unloadGuide() : loadGuide(tk))}
+                      onDoubleClick={() => setRenamingTake({ id: tk.id, name: tk.name })}
+                      title={loaded ? "Remove guide from the note views" : "Show as a guide in Bars / Score (double-click to rename)"}
+                      style={{
+                        ...btnBase, border: "none", padding: 0, flex: 1, minWidth: 0,
+                        display: "flex", alignItems: "center", gap: 6, textAlign: "left",
+                      }}
+                    >
+                      <span style={{ fontSize: 9, width: 10, color: loaded ? "#F5B971" : "rgba(175,169,236,0.7)" }}>
+                        {loaded ? "●" : "▸"}
+                      </span>
+                      <span className="da-song-title" style={{
+                        flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis",
+                        whiteSpace: "nowrap", color: loaded ? "#F5B971" : "rgba(255,255,255,0.85)",
+                      }}>
+                        {tk.name}
+                      </span>
+                      <span style={{ flexShrink: 0, fontSize: 9, color: "rgba(255,255,255,0.4)" }}>
+                        {fmtDuration(tk.durationMs)} · {tk.notes.length}n
+                      </span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    title="Export as MIDI"
+                    onClick={() => void exportTakeMidi(tk, active.title)}
+                    style={{ ...btnBase, padding: "1px 6px", fontSize: 9 }}
+                  >
+                    MIDI
+                  </button>
+                  <button
+                    type="button"
+                    title="Delete take"
+                    onClick={() => deleteTake(tk)}
+                    style={{
+                      ...btnBase, padding: "1px 5px",
+                      borderColor: "rgba(239,68,68,0.4)", color: "#ef4444",
+                      display: "inline-flex", alignItems: "center",
+                    }}
+                  >
+                    <TrashIcon />
+                  </button>
+                </div>
+              );
+            })}
+            {active.takes.length === 0 && (
+              <div style={{
+                fontFamily: "monospace", fontSize: 10, color: "rgba(255,255,255,0.3)",
+                padding: "12px 4px", textAlign: "center", lineHeight: 1.5,
+              }}>
+                No takes yet. Press REC above Bars / Score,<br />then save it here or import a MIDI file.
+              </div>
+            )}
+          </div>
+        </div>
+      ) : (
       <div className="da-songs-scroll" style={{
         flex: 1, overflowY: "auto", minHeight: 0,
         display: "flex", flexDirection: "column", gap: 6,
@@ -623,6 +823,7 @@ const DashboardChordBank: FC = () => {
           </div>
         ))}
       </div>
+      )}
     </div>
   );
 };

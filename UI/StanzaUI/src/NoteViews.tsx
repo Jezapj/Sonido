@@ -5,6 +5,7 @@ import { midiToName, NOTE_NAMES, STRING_LABELS } from "./music";
 import {
   getActiveNote, getNotes, getPitchFrame, getTrackerEpoch, type NoteEvent,
 } from "./pitchTracker";
+import { getGuide, guideJudgement, guideTime, judgeGuide, type Take, type TakeNote } from "./takes";
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -17,6 +18,10 @@ interface Palette {
   ink: string;
   dim: string;
   border: string;
+  guide: string;
+  guideFill: string;
+  hit: string;
+  miss: string;
 }
 
 const DARK: Palette = {
@@ -28,6 +33,10 @@ const DARK: Palette = {
   ink:        "rgba(255,255,255,0.85)",
   dim:        "rgba(255,255,255,0.35)",
   border:     "rgba(255,255,255,0.12)",
+  guide:      "#F5B971",
+  guideFill:  "rgba(245,185,113,0.05)",
+  hit:        "#5EE6A8",
+  miss:       "rgba(239,68,68,0.6)",
 };
 
 const LIGHT: Palette = {
@@ -39,6 +48,18 @@ const LIGHT: Palette = {
   ink:        "rgba(26,15,46,0.88)",
   dim:        "rgba(26,15,46,0.45)",
   border:     "rgba(0,0,0,0.1)",
+  guide:      "#c2410c",
+  guideFill:  "rgba(194,65,12,0.05)",
+  hit:        "#059669",
+  miss:       "rgba(220,38,38,0.6)",
+};
+
+/** Where the play line sits when a guide take is loaded (fraction of width). */
+const GUIDE_LINE_FRAC = 0.6;
+
+const guideColor = (p: Palette, i: number) => {
+  const j = guideJudgement(i);
+  return j === 1 ? p.hit : j === 0 ? p.miss : p.guide;
 };
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
@@ -114,9 +135,12 @@ export function NoteBarsView({ active }: { active: boolean }) {
     const notes = getNotes();
     const fr = getPitchFrame();
     const cur = getActiveNote();
+    const guide = getGuide();
+    const gt = guide ? guideTime(now) : 0;
+    if (guide) judgeGuide(notes, now);
 
-    const nowX = w - 10;
-    const pps = w / BAR_VISIBLE_SECS;
+    const nowX = guide ? Math.round(w * GUIDE_LINE_FRAC) : w - 10;
+    const pps = nowX / BAR_VISIBLE_SECS;
     const horizon = now - BAR_VISIBLE_SECS * 1000;
 
     const visible: NoteEvent[] = [];
@@ -126,9 +150,22 @@ export function NoteBarsView({ active }: { active: boolean }) {
       visible.push(n);
     }
 
+    // Guide notes: x is relative to the play line, upcoming ones sit to its right
+    const guideVis: { n: TakeNote; i: number; x0: number; x1: number }[] = [];
+    if (guide) {
+      for (let i = 0; i < guide.notes.length; i++) {
+        const n = guide.notes[i];
+        const x0 = nowX + ((n.startMs - gt) / 1000) * pps;
+        if (x0 > w) break;
+        const x1 = x0 + (n.durMs / 1000) * pps;
+        if (x1 >= 0) guideVis.push({ n, i, x0, x1 });
+      }
+    }
+
     // Auto-fit the pitch range to what's on screen
     let lo = Infinity, hi = -Infinity;
     for (const n of visible) { lo = Math.min(lo, n.midi); hi = Math.max(hi, n.midi); }
+    for (const { n } of guideVis) { lo = Math.min(lo, n.midi); hi = Math.max(hi, n.midi); }
     if (fr.voiced) { lo = Math.min(lo, fr.midi); hi = Math.max(hi, fr.midi); }
     const r = rangeRef.current;
     if (lo <= hi) {
@@ -157,14 +194,47 @@ export function NoteBarsView({ active }: { active: boolean }) {
       if (pc === 0 || (labelAll && !NOTE_NAMES[pc].includes("#"))) labels.push([midiToName(m), y]);
     }
 
-    // Spawn line
-    ctx.strokeStyle = p.gridStrong;
+    // Spawn line (and the upcoming-guide region to its right)
+    if (guide) {
+      ctx.fillStyle = p.guideFill;
+      ctx.fillRect(nowX, 0, w - nowX, h);
+    }
+    ctx.strokeStyle = guide ? p.guide : p.gridStrong;
     ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(nowX, 0); ctx.lineTo(nowX, h); ctx.stroke();
 
-    // Bars
     const barH = clamp(rowH * 0.72, 4, 18);
     const fs = clamp(barH * 0.75, 8, 11);
+
+    // Guide bars (outlined, label underneath so it doesn't collide with live labels)
+    ctx.font = `600 ${fs}px monospace`;
+    ctx.textBaseline = "top";
+    for (const { n, i, x0, x1 } of guideVis) {
+      const y = yOf(n.midi);
+      const col = guideColor(p, i);
+      const crossing = x0 <= nowX && x1 >= nowX;
+      const a = clamp(x1 / 40, 0, 1) * clamp((w - x0) / 40, 0, 1);
+      const r = Math.min(4, barH / 2);
+      ctx.beginPath();
+      ctx.roundRect(x0, y - barH / 2, Math.max(3, x1 - x0), barH, r);
+      ctx.globalAlpha = a * (crossing ? 0.45 : 0.22);
+      ctx.fillStyle = col;
+      ctx.fill();
+      ctx.globalAlpha = a;
+      ctx.strokeStyle = col;
+      ctx.lineWidth = crossing ? 1.5 : 1;
+      if (crossing) { ctx.shadowColor = col; ctx.shadowBlur = 10; }
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = col;
+      const label = n.fret !== null && n.string !== null
+        ? `${midiToName(n.midi)} ${STRING_LABELS[n.string]}${n.fret}`
+        : midiToName(n.midi);
+      ctx.fillText(label, Math.max(2, x0), y + barH / 2 + 1);
+    }
+    ctx.globalAlpha = 1;
+
+    // Live bars
     ctx.font = `600 ${fs}px monospace`;
     ctx.textBaseline = "bottom";
     for (const n of visible) {
@@ -200,7 +270,7 @@ export function NoteBarsView({ active }: { active: boolean }) {
     ctx.fillStyle = p.dim;
     for (const [t, y] of labels) ctx.fillText(t, 4, y);
 
-    if (visible.length === 0 && !fr.voiced) hint(ctx, w, h, p, "play a note…");
+    if (visible.length === 0 && !fr.voiced && !guide) hint(ctx, w, h, p, "play a note…");
   });
 
   return (
@@ -236,6 +306,49 @@ function staffPos(writtenMidi: number, clef: ClefKind) {
   return { p: step - (clef === "bass" ? G2_STEP : E4_STEP), sharp: SHARP_PC.has(pc) };
 }
 
+type DrawNote = Pick<NoteEvent, "midi" | "string" | "fret">;
+
+interface NoteStyle<T extends DrawNote> {
+  xOf: (n: T) => number;
+  alphaAt: (x: number) => number;
+  color: (n: T) => string;
+  glow: (n: T) => boolean;
+}
+
+interface GuideLayout {
+  take: Take;
+  minGap: number;
+  pos: number[];
+  index: Map<TakeNote, number>;
+  headAt: (t: number) => number;
+}
+
+/** Spread guide notes like live ones (≥ minGap apart) and map take time → scroll position. */
+function guideLayout(ref: { current: GuideLayout | null }, take: Take, minGap: number): GuideLayout {
+  const cached = ref.current;
+  if (cached && cached.take === take && cached.minGap === minGap) return cached;
+
+  const pxPerMs = SCORE_PPS / 1000;
+  const times = take.notes.map(n => n.startMs);
+  const pos: number[] = [];
+  for (let i = 0; i < times.length; i++) {
+    pos.push(i === 0 ? times[0] * pxPerMs : Math.max(times[i] * pxPerMs, pos[i - 1] + minGap));
+  }
+  const headAt = (t: number) => {
+    const n = times.length;
+    if (n === 0) return t * pxPerMs;
+    if (t <= times[0]) return pos[0] + (t - times[0]) * pxPerMs;
+    if (t >= times[n - 1]) return pos[n - 1] + (t - times[n - 1]) * pxPerMs;
+    let lo = 0, hi = n - 1;
+    while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (times[mid] <= t) lo = mid; else hi = mid; }
+    const span = times[hi] - times[lo];
+    return span > 0 ? pos[lo] + ((pos[hi] - pos[lo]) * (t - times[lo])) / span : pos[hi];
+  };
+  const layout = { take, minGap, pos, index: new Map(take.notes.map((n, i) => [n, i] as const)), headAt };
+  ref.current = layout;
+  return layout;
+}
+
 export function NotationView({ active, mode }: { active: boolean; mode: NotationMode }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const pal = usePalette();
@@ -246,6 +359,7 @@ export function NotationView({ active, mode }: { active: boolean; mode: Notation
   clefRef.current = clef;
   const clefHitRef = useRef({ x: 0, y: 0, w: 0, h: 0 });
   const layoutRef = useRef<ScoreLayout>({ epoch: -1, pos: new Map(), lastPos: 0, scroll: 0, lastTime: 0 });
+  const guideLayoutRef = useRef<GuideLayout | null>(null);
 
   useRaf(active, () => {
     const fit = fitCanvas(canvasRef.current);
@@ -282,20 +396,48 @@ export function NotationView({ active, mode }: { active: boolean; mode: Notation
     }
     if (L.lastPos > L.scroll) L.scroll += (L.lastPos - L.scroll) * 0.2;
 
-    const spawnX = w - 18;
+    const guide = getGuide();
+    if (guide) judgeGuide(notes, now);
+
+    const spawnX = guide ? Math.round(w * GUIDE_LINE_FRAC) : w - 18;
     const headerW = isTab ? Math.max(22, Math.round(h / 9)) : g * 3.4 + 6;
     const xOf = (n: NoteEvent) => spawnX - (L.scroll - (L.pos.get(n.id) ?? L.scroll));
     const alphaAt = (x: number) => clamp((x - headerW - 4) / 30, 0, 1);
+    const liveStyle: NoteStyle<NoteEvent> = { xOf, alphaAt, color: n => n === cur ? p.accent : p.ink, glow: n => n === cur };
 
-    // Spawn cursor
-    ctx.strokeStyle = p.gridStrong;
+    // Guide notes cross the play line exactly at their recorded time; dense runs are spread out
+    let guideStyle: NoteStyle<TakeNote> | null = null;
+    if (guide) {
+      const G = guideLayout(guideLayoutRef, guide, minGap);
+      const head = G.headAt(guideTime(now));
+      const gx = (n: TakeNote) => spawnX + (G.pos[G.index.get(n) ?? 0] - head);
+      guideStyle = {
+        xOf: gx,
+        alphaAt: x => alphaAt(x) * clamp((w - 6 - x) / 30, 0, 1),
+        color: n => guideColor(p, G.index.get(n) ?? 0),
+        glow: n => Math.abs(gx(n) - spawnX) < minGap / 2,
+      };
+      ctx.fillStyle = p.guideFill;
+      ctx.fillRect(spawnX, 0, w - spawnX, h);
+    }
+
+    // Spawn cursor (the play line when a guide is loaded)
+    const cursorX = guide ? spawnX : spawnX + minGap / 2;
+    ctx.strokeStyle = guide ? p.guide : p.gridStrong;
     ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(spawnX + minGap / 2, 4); ctx.lineTo(spawnX + minGap / 2, h - 4); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cursorX, 4); ctx.lineTo(cursorX, h - 4); ctx.stroke();
 
-    if (isTab) drawTab(ctx, w, h, p, notes, cur, xOf, alphaAt, headerW);
-    else       drawStaff(ctx, w, h, g, p, notes, cur, xOf, alphaAt, clefRef.current, clefHitRef.current);
+    if (isTab) {
+      drawTabFrame(ctx, w, h, p, headerW);
+      if (guide && guideStyle) drawTabNotes(ctx, w, h, guide.notes, guideStyle);
+      drawTabNotes(ctx, w, h, notes, liveStyle);
+    } else {
+      const frame = drawStaffFrame(ctx, w, h, g, p, clefRef.current, clefHitRef.current);
+      if (guide && guideStyle) drawStaffNotes(ctx, w, g, frame, guide.notes, guideStyle, clefRef.current);
+      drawStaffNotes(ctx, w, g, frame, notes, liveStyle, clefRef.current);
+    }
 
-    if (notes.length === 0) hint(ctx, w, h, p, "play a note…");
+    if (notes.length === 0 && !guide) hint(ctx, w, h, p, "play a note…");
   });
 
   const overClef = (e: React.PointerEvent) => {
@@ -334,12 +476,12 @@ export function NotationView({ active, mode }: { active: boolean; mode: Notation
   );
 }
 
-function drawStaff(
+interface StaffFrame { bottom: number; yOfPos: (pos: number) => number; }
+
+function drawStaffFrame(
   ctx: CanvasRenderingContext2D, w: number, h: number, g: number, p: Palette,
-  notes: readonly NoteEvent[], cur: NoteEvent | null,
-  xOf: (n: NoteEvent) => number, alphaAt: (x: number) => number,
   clef: ClefKind, hit: { x: number; y: number; w: number; h: number },
-) {
+): StaffFrame {
   const staffSpan = 4 * g;
   const above = g * 1.05;
   const below = g * 2.25;
@@ -371,17 +513,26 @@ function drawStaff(
   ctx.fillText("8", 6 + g * 1.15, bottom + g * 1.45);
   hit.x = 0; hit.y = bottom - 4.4 * g; hit.w = g * 3.4; hit.h = 6.2 * g;
 
+  return { bottom, yOfPos };
+}
+
+function drawStaffNotes<T extends DrawNote>(
+  ctx: CanvasRenderingContext2D, w: number, g: number, frame: StaffFrame,
+  notes: readonly T[], style: NoteStyle<T>, clef: ClefKind,
+) {
+  const { bottom, yOfPos } = frame;
   const rx = g * 0.66, ry = g * 0.47;
   for (const n of notes) {
-    const x = xOf(n);
-    const a = alphaAt(x);
-    if (a <= 0 || x > w) continue;
+    const x = style.xOf(n);
+    if (x > w + rx) continue;
+    const a = style.alphaAt(x);
+    if (a <= 0) continue;
 
     let { p: pos, sharp } = staffPos(n.midi + 12, clef);
     let ottava = false;
     if (pos > 15) { pos -= 7; ottava = true; }
     const y = yOfPos(pos);
-    const color = n === cur ? p.accent : p.ink;
+    const color = style.color(n);
     ctx.globalAlpha = a;
     ctx.strokeStyle = color;
     ctx.fillStyle = color;
@@ -396,7 +547,7 @@ function drawStaff(
       ctx.beginPath(); ctx.moveTo(x - rx * 1.7, ly); ctx.lineTo(x + rx * 1.7, ly); ctx.stroke();
     }
 
-    if (n === cur) { ctx.shadowColor = p.accent; ctx.shadowBlur = 8; }
+    if (style.glow(n)) { ctx.shadowColor = color; ctx.shadowBlur = 8; }
     ctx.beginPath(); ctx.ellipse(x, y, rx, ry, -0.35, 0, Math.PI * 2); ctx.fill();
     ctx.shadowBlur = 0;
 
@@ -422,14 +573,11 @@ function drawStaff(
   ctx.globalAlpha = 1;
 }
 
-function drawTab(
-  ctx: CanvasRenderingContext2D, w: number, h: number, p: Palette,
-  notes: readonly NoteEvent[], cur: NoteEvent | null,
-  xOf: (n: NoteEvent) => number, alphaAt: (x: number) => number, headerW: number,
-) {
-  const s = clamp((h - 28) / 7.4, 7, 22);
+const tabSpacing = (h: number) => clamp((h - 28) / 7.4, 7, 22);
+
+function drawTabFrame(ctx: CanvasRenderingContext2D, w: number, h: number, p: Palette, headerW: number) {
+  const s = tabSpacing(h);
   const top = (h - 5 * s) / 2;
-  const yOfString = (str: number) => top + (5 - str) * s;   // high e on top
   const labelFs = clamp(s * 0.55, 9, 16);
 
   ctx.strokeStyle = p.dim;
@@ -438,20 +586,29 @@ function drawTab(
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   for (let str = 0; str < 6; str++) {
-    const y = yOfString(str);
+    const y = top + (5 - str) * s;   // high e on top
     ctx.beginPath(); ctx.moveTo(headerW, y); ctx.lineTo(w - 4, y); ctx.stroke();
     ctx.fillStyle = p.dim;
     ctx.fillText(STRING_LABELS[str], headerW / 2 + 1, y);
   }
+}
 
+function drawTabNotes<T extends DrawNote>(
+  ctx: CanvasRenderingContext2D, w: number, h: number, notes: readonly T[], style: NoteStyle<T>,
+) {
+  const s = tabSpacing(h);
+  const top = (h - 5 * s) / 2;
   const fs = clamp(s * 0.72, 9, 22);
   ctx.font = `700 ${fs}px monospace`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
   for (const n of notes) {
     if (n.string === null || n.fret === null) continue;
-    const x = xOf(n);
-    const a = alphaAt(x);
-    if (a <= 0 || x > w) continue;
-    const y = yOfString(n.string);
+    const x = style.xOf(n);
+    if (x > w) continue;
+    const a = style.alphaAt(x);
+    if (a <= 0) continue;
+    const y = top + (5 - n.string) * s;
     const label = String(n.fret);
     const tw = ctx.measureText(label).width;
 
@@ -462,9 +619,9 @@ function drawTab(
     ctx.globalCompositeOperation = "source-over";
 
     ctx.globalAlpha = a;
-    const isCur = n === cur;
-    ctx.fillStyle = isCur ? p.accent : p.ink;
-    if (isCur) { ctx.shadowColor = p.accent; ctx.shadowBlur = 8; }
+    const color = style.color(n);
+    ctx.fillStyle = color;
+    if (style.glow(n)) { ctx.shadowColor = color; ctx.shadowBlur = 8; }
     ctx.fillText(label, x, y + 0.5);
     ctx.shadowBlur = 0;
   }

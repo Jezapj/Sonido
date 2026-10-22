@@ -196,6 +196,11 @@ fn toggle_fullscreen(window: Window) {
 }
 
 #[tauri::command]
+fn write_binary_file(path: String, data: Vec<u8>) -> Result<(), String> {
+    std::fs::write(&path, data).map_err(|e| format!("write {path}: {e}"))
+}
+
+#[tauri::command]
 fn greet(name: &str) -> String {
     format!("{}*STANZA*", name.to_uppercase())
 }
@@ -608,8 +613,10 @@ pub fn run() {
         .manage(LoopState(Mutex::new(LoopBuffer::default())))
         .manage(monitor::NativeMonitor::new())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             greet,
+            write_binary_file,
             list_serial_ports,
             stream_audio,
             stream_audio_serial,

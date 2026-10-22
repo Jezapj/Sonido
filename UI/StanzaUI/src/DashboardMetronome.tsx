@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, FC } from "react";
+import { setTempo } from "./takes";
 
 export type TimeSig = { beats: number; noteValue: number; label: string };
 
@@ -63,6 +64,7 @@ const DashboardMetronome: FC = () => {
   const runningRef = useRef(false);
 
   useEffect(() => { bpmRef.current = bpm; }, [bpm]);
+  useEffect(() => { setTempo(bpm, sig.beats, sig.noteValue); }, [bpm, sig.beats, sig.noteValue]);
   useEffect(() => { accentsRef.current = accents; }, [accents]);
   useEffect(() => { beatsRef.current = sig.beats; }, [sig.beats]);
   useEffect(() => { volumeRef.current = volume; }, [volume]);
