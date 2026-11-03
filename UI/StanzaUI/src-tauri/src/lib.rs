@@ -377,8 +377,8 @@ async fn stream_audio(app: tauri::AppHandle) {
 ///
 /// Architecture: the ESP32 sends processed audio to the host one-way.
 /// The looper buffer lives on the host. `chunk_f32` is what the monitor
-/// should hear: it is pushed to the native output and emitted as
-/// `audio_chunk` for visuals and pitch tracking.
+/// should hear and is pushed to the native output; the untouched live input
+/// is emitted as `audio_chunk` for visuals and pitch tracking.
 ///   - Recording   → append i16 samples; monitor stays live
 ///   - Playing     → loop into monitor (optionally mute live via monitor_live)
 ///   - Overdubbing → same monitor behaviour + overdub into buffer
@@ -423,6 +423,9 @@ async fn stream_audio_serial(app: tauri::AppHandle, port_name: String, baud_rate
                     }
                     if chunk_i16.is_empty() { continue; }
 
+                    // Visuals and pitch tracking follow the live input, never the loop mix.
+                    let live_f32 = chunk_f32.clone();
+
                     // ── Looper: capture + live-monitor playback ───────────────────────
                     {
                         let state = app.state::<LoopState>();
@@ -464,10 +467,10 @@ async fn stream_audio_serial(app: tauri::AppHandle, port_name: String, baud_rate
                         let _ = app.emit("looper_info", info);
                     }
 
-                    // Same samples the visuals receive. Playback is native; the
-                    // event stays for waveforms, pitch tracking, and the UI.
+                    // The speakers get the loop mix; the event carries only the live
+                    // input for waveforms, pitch tracking, and the UI.
                     app.state::<monitor::NativeMonitor>().push(&chunk_f32);
-                    let _ = app.emit("audio_chunk", &chunk_f32);
+                    let _ = app.emit("audio_chunk", &live_f32);
                 }
 
                 Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => {}

@@ -37,8 +37,14 @@ const STRING_CHANNEL_TAG = "stanza:channel=string";
 const GM_CLEAN_GUITAR = 27;
 /** How far ahead of the play line the guide starts, so the first notes scroll in. */
 export const GUIDE_LEAD_MS = 3000;
-/** A live note counts as a hit if it starts this close to the guide note. */
-const HIT_WINDOW_MS = 250;
+/** A live note counts as a hit if it starts within this window around the guide note.
+ *  Late is wider: detection lags the pick by the settle frames plus stream latency. */
+const HIT_EARLY_MS = 350;
+const HIT_LATE_MS = 550;
+
+/** Same pitch, or the same pitch class an octave off (YIN octave slips). */
+const pitchMatches = (played: number, wanted: number) =>
+  played === wanted || Math.abs(played - wanted) === 12;
 
 // ── Store ─────────────────────────────────────────────────────────────────────
 
@@ -183,14 +189,16 @@ export function judgeGuide(live: readonly NoteEvent[], now: number) {
   if (judged.length !== g.notes.length) resetJudging();
   for (let i = judgeFrom; i < g.notes.length; i++) {
     const at = guideStartAt + g.notes[i].startMs;
-    if (at - HIT_WINDOW_MS > now) break;
+    if (at - HIT_EARLY_MS > now) break;
     if (judged[i] === -1) {
+      // Any matching live note sounding inside the window counts, including one
+      // still held from earlier (re-picks of the same pitch can merge into it).
       for (let j = live.length - 1; j >= 0; j--) {
         const l = live[j];
-        if (l.start < at - HIT_WINDOW_MS) break;
-        if (l.start <= at + HIT_WINDOW_MS && l.midi === g.notes[i].midi) { judged[i] = 1; break; }
+        if ((l.end ?? now) < at - HIT_EARLY_MS) break;
+        if (l.start <= at + HIT_LATE_MS && pitchMatches(l.midi, g.notes[i].midi)) { judged[i] = 1; break; }
       }
-      if (judged[i] === -1 && now > at + HIT_WINDOW_MS) judged[i] = 0;
+      if (judged[i] === -1 && now > at + HIT_LATE_MS) judged[i] = 0;
     }
     if (judged[i] !== -1 && i === judgeFrom) judgeFrom++;
   }

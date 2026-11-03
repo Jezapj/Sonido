@@ -17,6 +17,7 @@ export const STANDARD_TUNING = [40, 45, 50, 55, 59, 64];
 export const STRING_LABELS   = ["E", "A", "D", "G", "B", "e"];
 export const FRET_COUNT      = 22;
 export const HAND_SPAN       = 5;   // frets reachable without shifting position
+export const OPEN_MAX_HAND   = 5;   // open strings only count as "in reach" while the hand is this low
 
 export interface Fingering { string: number; fret: number; }
 
@@ -33,7 +34,8 @@ export function newFingeringState(): FingeringState {
 
 /**
  * Pick a string/fret for `midi`, favouring the least string movement while
- * staying inside a 5-fret hand window (open strings are always reachable).
+ * staying inside a 5-fret hand window. Open strings are only preferred near
+ * the nut; higher up the neck the fretted equivalent wins.
  * The window only shifts when no in-window option exists. Mutates `st`.
  */
 export function assignFingering(midi: number, st: FingeringState): Fingering | null {
@@ -49,11 +51,12 @@ export function assignFingering(midi: number, st: FingeringState): Fingering | n
       cost = fret;
     } else {
       const top = st.hand + HAND_SPAN - 1;
-      const inWindow = fret === 0 || (fret >= st.hand && fret <= top);
+      const inWindow = fret === 0 ? st.hand <= OPEN_MAX_HAND : fret >= st.hand && fret <= top;
       cost = Math.abs(s - st.prevString);
       if (fret > 0 && st.prevFret > 0) cost += Math.abs(fret - st.prevFret) * 0.25;
+      if (fret === 0) cost += 0.5;   // tie-break towards the fretted note
       if (!inWindow) {
-        const shift = fret < st.hand ? st.hand - fret : fret - top;
+        const shift = fret === 0 ? st.hand : fret < st.hand ? st.hand - fret : fret - top;
         cost += 8 + shift * 1.5;
       }
     }

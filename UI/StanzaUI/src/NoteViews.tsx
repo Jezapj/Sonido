@@ -227,10 +227,7 @@ export function NoteBarsView({ active }: { active: boolean }) {
       ctx.stroke();
       ctx.shadowBlur = 0;
       ctx.fillStyle = col;
-      const label = n.fret !== null && n.string !== null
-        ? `${midiToName(n.midi)} ${STRING_LABELS[n.string]}${n.fret}`
-        : midiToName(n.midi);
-      ctx.fillText(label, Math.max(2, x0), y + barH / 2 + 1);
+      ctx.fillText(midiToName(n.midi), Math.max(2, x0), y + barH / 2 + 1);
     }
     ctx.globalAlpha = 1;
 
