@@ -14,17 +14,17 @@ export interface MidiNoteMs {
 
 export interface MidiWriteInput {
   name: string;
-  bpm: number;
+  bpm: number;        // quarter notes per minute
   timeSig: [number, number];
   program: number;    // General MIDI program, 0-based
   channels: number[]; // channels that get the program change
-  text?: string;
+  texts?: string[];
   notes: MidiNoteMs[];
 }
 
 export interface MidiReadResult {
   name: string;
-  bpm: number;
+  bpm: number;        // quarter notes per minute, from the first tempo event
   timeSig: [number, number];
   texts: string[];
   notes: MidiNoteMs[];
@@ -76,7 +76,7 @@ export function encodeMidi(input: MidiWriteInput): Uint8Array {
   ];
 
   const track: AbsEvent[] = [{ tick: 0, order: 0, bytes: meta(0x03, ascii("Guitar")) }];
-  if (input.text) track.push({ tick: 0, order: 1, bytes: meta(0x01, ascii(input.text)) });
+  for (const t of input.texts ?? []) track.push({ tick: 0, order: 1, bytes: meta(0x01, ascii(t)) });
   for (const ch of input.channels) {
     track.push({ tick: 0, order: 2, bytes: [0xc0 | (ch & 0x0f), input.program & 0x7f] });
   }
@@ -205,6 +205,6 @@ export function decodeMidi(bytes: Uint8Array): MidiReadResult {
     })
     .sort((a, b) => a.startMs - b.startMs);
 
-  const bpm = tempos.length ? Math.round(60_000_000 / tempos[0].us) : 120;
+  const bpm = tempos.length ? 60_000_000 / tempos[0].us : 120;
   return { name, bpm, timeSig: timeSig ?? [4, 4], texts, notes };
 }

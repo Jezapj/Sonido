@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useIsLightMode } from "./UseTheme";
 import {
   beginRecording, discardPending, endRecording, exportTakeMidi, fmtDuration,
-  guideScore, playGuide, stopGuide, unloadGuide, useTakes,
+  guideScore, playGuide, stopGuide, tempoLabel, unloadGuide, useTakes,
 } from "./takes";
 
 const REC = "#ef4444";
@@ -82,6 +82,7 @@ export default function TakeBar() {
         <div style={{ display: "flex", alignItems: "center", gap: 5, minWidth: 0 }}>
           <span style={{ ...chip, color: accent }}>
             TAKE {fmtDuration(t.pending.durationMs)} · {t.pending.notes.length} notes
+            {t.pending.sync ? ` · ${tempoLabel(t.pending)}` : ""}
           </span>
           <button type="button" style={btn} title="Export as a MIDI file"
             onClick={() => { if (t.pending) void exportTakeMidi(t.pending); }}>
@@ -100,6 +101,7 @@ export default function TakeBar() {
           <span style={{ ...chip, color: guideCol, maxWidth: 140 }} title={t.guide.name}>
             GUIDE · {t.guide.name}
           </span>
+          {t.guide.sync && <span style={{ ...chip, color: dim }}>{tempoLabel(t.guide)}</span>}
           {score && score.judged > 0 && (
             <span style={{ ...chip, color: dim }}>{score.hit}/{score.total}</span>
           )}

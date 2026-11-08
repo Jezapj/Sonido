@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState, FC } from "react";
 import {
-  claimPending, exportTakeMidi, fmtDuration, loadGuide, midiToTake, unloadGuide, useTakes,
+  claimPending, exportTakeMidi, fmtDuration, loadGuide, midiToTake, nudgeTakeSync, refreshGuide,
+  retimeTake, setTakeSynced, takeFirstCount, tempoLabel, unloadGuide, useTakes,
   type Take,
 } from "./takes";
+import { TIME_SIGNATURES } from "./DashboardMetronome";
 
 export type ChordVerse = {
   label: string;
@@ -165,6 +167,74 @@ function versesToText(verses: ChordVerse[]): string {
 
 type Mode = "list" | "view" | "edit";
 
+const SYNC_ACCENT = "#AFA9EC";
+
+/** Tie a take to a tempo / time signature, and line its bar lines up with the playing. */
+function TakeSyncEditor({ take, onChange }: { take: Take; onChange: (next: Take) => void }) {
+  const [bpmText, setBpmText] = useState(String(take.bpm));
+  useEffect(() => { setBpmText(String(take.bpm)); }, [take.bpm]);
+
+  const small: React.CSSProperties = { ...btnBase, padding: "1px 5px", fontSize: 9, lineHeight: "1.4" };
+  const label: React.CSSProperties = { fontFamily: "monospace", fontSize: 9, color: "rgba(255,255,255,0.45)" };
+  const synced = !!take.sync;
+  const sigIdx = TIME_SIGNATURES.findIndex(s => s.beats === take.timeSig[0] && s.noteValue === take.timeSig[1]);
+
+  const commitBpm = () => {
+    const v = Math.round(Number(bpmText) * 100) / 100;
+    if (v >= 20 && v <= 300) { if (v !== take.bpm) onChange(retimeTake(take, v, take.timeSig)); }
+    else setBpmText(String(take.bpm));
+  };
+  const cycleSig = (dir: -1 | 1) => {
+    const n = TIME_SIGNATURES.length;
+    const s = TIME_SIGNATURES[sigIdx < 0 ? 2 : (sigIdx + dir + n) % n];
+    onChange(retimeTake(take, take.bpm, [s.beats, s.noteValue]));
+  };
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 0 1px 16px", flexWrap: "wrap" }}>
+      <button
+        type="button"
+        onClick={() => onChange(setTakeSynced(take, !synced))}
+        title={synced ? "Stop treating this take as in time" : "Draw bars and note lengths at this tempo"}
+        style={{
+          ...small,
+          borderColor: synced ? "rgba(175,169,236,0.6)" : "rgba(255,255,255,0.25)",
+          color: synced ? SYNC_ACCENT : "rgba(255,255,255,0.6)",
+          background: synced ? "rgba(175,169,236,0.12)" : "transparent",
+        }}
+      >
+        {synced ? "SYNC ON" : "SYNC OFF"}
+      </button>
+      {synced && (
+        <>
+          <input
+            value={bpmText}
+            inputMode="decimal"
+            onChange={e => setBpmText(e.target.value)}
+            onBlur={commitBpm}
+            onKeyDown={e => { if (e.key === "Enter") commitBpm(); }}
+            title="Tempo (clicks per minute)"
+            style={{ ...fieldStyle, width: 38, padding: "1px 4px", fontSize: 9, textAlign: "center" }}
+          />
+          <span style={label}>BPM</span>
+          <button type="button" style={small} onClick={() => cycleSig(-1)}>&lsaquo;</button>
+          <span style={{ ...label, color: "rgba(255,255,255,0.85)", minWidth: 24, textAlign: "center" }}>
+            {take.timeSig[0]}/{take.timeSig[1]}
+          </span>
+          <button type="button" style={small} onClick={() => cycleSig(1)}>&rsaquo;</button>
+          <button type="button" style={small} title="First note a 16th earlier in the bar"
+            onClick={() => onChange(nudgeTakeSync(take, -1))}>&lsaquo;</button>
+          <span style={{ ...label, minWidth: 34, textAlign: "center" }} title="Count the first note falls on">
+            on <span style={{ color: SYNC_ACCENT }}>{takeFirstCount(take)}</span>
+          </span>
+          <button type="button" style={small} title="First note a 16th later in the bar"
+            onClick={() => onChange(nudgeTakeSync(take, 1))}>&rsaquo;</button>
+        </>
+      )}
+    </div>
+  );
+}
+
 const DashboardChordBank: FC = () => {
   const [songs, setSongs] = useState<Song[]>(() => loadBank().songs);
   const [folders, setFolders] = useState<SongFolder[]>(() => loadBank().folders);
@@ -217,6 +287,13 @@ const DashboardChordBank: FC = () => {
     } catch (err) {
       setTakeError(err instanceof Error ? err.message : "Could not read that MIDI file");
     }
+  }, [active, updateTakes]);
+
+  const [syncEditId, setSyncEditId] = useState<string | null>(null);
+  const editTake = useCallback((next: Take) => {
+    if (!active) return;
+    updateTakes(active.id, ts => ts.map(t => t.id === next.id ? next : t));
+    refreshGuide(next);
   }, [active, updateTakes]);
 
   const deleteTake = useCallback((take: Take) => {
@@ -709,12 +786,13 @@ const DashboardChordBank: FC = () => {
                   key={tk.id}
                   className="da-song-row"
                   style={{
-                    display: "flex", alignItems: "center", gap: 5,
+                    display: "flex", flexDirection: "column",
                     padding: "3px 4px 3px 8px", borderRadius: 8,
                     border: loaded ? "0.5px solid rgba(245,185,113,0.7)" : "0.5px solid rgba(255,255,255,0.14)",
                     background: loaded ? "rgba(245,185,113,0.1)" : "rgba(255,255,255,0.03)",
                   }}
                 >
+                <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
                   {renamingTake?.id === tk.id ? (
                     <input
                       autoFocus
@@ -754,6 +832,19 @@ const DashboardChordBank: FC = () => {
                   )}
                   <button
                     type="button"
+                    title={tk.sync ? `In time at ${tempoLabel(tk)}. Edit the sync` : "Not in time. Set a tempo"}
+                    onClick={() => setSyncEditId(id => (id === tk.id ? null : tk.id))}
+                    style={{
+                      ...btnBase, padding: "1px 5px", fontSize: 9,
+                      borderColor: tk.sync || syncEditId === tk.id ? "rgba(175,169,236,0.55)" : "rgba(255,255,255,0.25)",
+                      color: tk.sync ? SYNC_ACCENT : "rgba(255,255,255,0.45)",
+                      background: syncEditId === tk.id ? "rgba(175,169,236,0.12)" : "transparent",
+                    }}
+                  >
+                    {tk.sync ? `♩${Math.round(tk.bpm)}` : "♩"}
+                  </button>
+                  <button
+                    type="button"
                     title="Export as MIDI"
                     onClick={() => void exportTakeMidi(tk, active.title)}
                     style={{ ...btnBase, padding: "1px 6px", fontSize: 9 }}
@@ -772,6 +863,8 @@ const DashboardChordBank: FC = () => {
                   >
                     <TrashIcon />
                   </button>
+                </div>
+                {syncEditId === tk.id && <TakeSyncEditor take={tk} onChange={editTake} />}
                 </div>
               );
             })}

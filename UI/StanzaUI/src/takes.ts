@@ -12,7 +12,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import { assignFingering, newFingeringState, STANDARD_TUNING, FRET_COUNT } from "./music";
 import { decodeMidi, encodeMidi } from "./midi";
-import { startRecording, stopRecording, type NoteEvent } from "./pitchTracker";
+import { ONSET_LAG_MS, startRecording, stopRecording, type NoteEvent } from "./pitchTracker";
+import { barMs, countAt, normalizeDownbeat, type Meter } from "./rhythm";
 
 export interface TakeNote {
   midi: number;
@@ -23,17 +24,30 @@ export interface TakeNote {
   fret: number | null;
 }
 
+export interface TakeSync {
+  /** Take time (ms) of bar 1, beat 1, in the notes' (detected) timebase. */
+  downbeatMs: number;
+}
+
 export interface Take {
   id: string;
   name: string;
   createdAt: number;
-  bpm: number;
+  bpm: number;                // metronome clicks per minute (one per 1/timeSig[1] note)
   timeSig: [number, number];
   durationMs: number;
   notes: TakeNote[];
+  /** Set when the take is tied to the metronome: views draw bars and real note values. */
+  sync?: TakeSync | null;
+}
+
+export function meterOf(take: Take): Meter | null {
+  if (!take.sync) return null;
+  return { bpm: take.bpm, num: take.timeSig[0], den: take.timeSig[1], downbeatMs: take.sync.downbeatMs };
 }
 
 const STRING_CHANNEL_TAG = "stanza:channel=string";
+const UNSYNCED_TAG = "stanza:sync=0";
 const GM_CLEAN_GUITAR = 27;
 /** How far ahead of the play line the guide starts, so the first notes scroll in. */
 export const GUIDE_LEAD_MS = 3000;
@@ -85,6 +99,41 @@ export function setTempo(bpm: number, beats: number, noteValue: number) {
   tempo = { bpm, timeSig: [beats, noteValue] };
 }
 
+// Where the clicks fall, so a take recorded against them keeps their bar lines.
+// Times are performance.now() ms at the speaker.
+let metro = { running: false, downbeatAt: 0, since: Infinity, stoppedAt: -Infinity };
+
+/** Called by the metronome on every click: `downbeatAt` is any beat-1 click on the
+ *  current grid, `since` when that grid (tempo / phase) took effect. */
+export function metronomeBeat(downbeatAt: number, since: number) {
+  metro = { running: true, downbeatAt, since, stoppedAt: -Infinity };
+}
+
+export function metronomeStopped() {
+  if (metro.running) metro = { ...metro, running: false, stoppedAt: performance.now() };
+}
+
+export interface MetronomeCue {
+  bpm: number;
+  timeSig: [number, number];
+  startAt: number;   // performance.now() ms of the first (count-in) click
+}
+
+const cueListeners = new Set<(cue: MetronomeCue | null) => void>();
+
+/** Guide playback asks the metronome to click along (null = stop the cued click). */
+export function onMetronomeCue(fn: (cue: MetronomeCue | null) => void) {
+  cueListeners.add(fn);
+  return () => { cueListeners.delete(fn); };
+}
+
+let cued = false;
+function cueMetronome(cue: MetronomeCue | null) {
+  if (!cue && !cued) return;
+  cued = !!cue;
+  cueListeners.forEach(fn => fn(cue));
+}
+
 // ── Recording ─────────────────────────────────────────────────────────────────
 
 export function beginRecording() {
@@ -118,7 +167,7 @@ function takeFromNotes(notes: NoteEvent[]): Take | null {
     };
   });
   const last = out[out.length - 1];
-  return {
+  const take: Take = {
     id: `take-${Date.now()}`,
     name: "Take",
     createdAt: Date.now(),
@@ -126,8 +175,59 @@ function takeFromNotes(notes: NoteEvent[]): Take | null {
     timeSig: tempo.timeSig,
     durationMs: last.startMs + last.durMs,
     notes: out,
+    sync: null,
   };
+
+  // Clicking steadily through the whole take: keep its grid. Notes are stamped
+  // ONSET_LAG_MS after the pick, so the grid is shifted by the same amount.
+  const clicked = metro.since <= t0
+    && (metro.running || metro.stoppedAt >= notes[notes.length - 1].start);
+  if (clicked) {
+    const m: Meter = {
+      bpm: take.bpm, num: take.timeSig[0], den: take.timeSig[1],
+      downbeatMs: metro.downbeatAt + ONSET_LAG_MS - t0,
+    };
+    take.sync = { downbeatMs: normalizeDownbeat(m, 0) };
+  }
+  return take;
 }
+
+// ── Sync editing (SONGS → TAKES) ──────────────────────────────────────────────
+
+const firstStart = (take: Take) => take.notes[0]?.startMs ?? 0;
+
+/** Tie a take to its BPM / time signature (first note on beat 1), or untie it. */
+export function setTakeSynced(take: Take, on: boolean): Take {
+  return { ...take, sync: on ? { downbeatMs: firstStart(take) } : null };
+}
+
+/** Change tempo / time signature, keeping the first note on the same beat. */
+export function retimeTake(take: Take, bpm: number, timeSig: [number, number]): Take {
+  const m = meterOf(take);
+  if (!m) return { ...take, bpm, timeSig };
+  const first = firstStart(take);
+  const beatsIn = (first - m.downbeatMs) / (60000 / m.bpm);
+  const next: Meter = { bpm, num: timeSig[0], den: timeSig[1], downbeatMs: first - beatsIn * (60000 / bpm) };
+  return { ...take, bpm, timeSig, sync: { downbeatMs: normalizeDownbeat(next, first) } };
+}
+
+/** Move the bar lines so the first note lands `steps` 16ths later in the bar. */
+export function nudgeTakeSync(take: Take, steps: number): Take {
+  const m = meterOf(take);
+  if (!m) return take;
+  const sixteenth = (60000 / m.bpm) * (m.den / 16);
+  const shifted = { ...m, downbeatMs: m.downbeatMs - steps * sixteenth };
+  return { ...take, sync: { downbeatMs: normalizeDownbeat(shifted, firstStart(take)) } };
+}
+
+/** The count the first note falls on ("1", "2&" …), or "" for an unsynced take. */
+export function takeFirstCount(take: Take): string {
+  const m = meterOf(take);
+  return m ? countAt(m, firstStart(take)) : "";
+}
+
+export const tempoLabel = (take: Take) =>
+  `${take.timeSig[1] === 8 ? "♪" : "♩"}${Math.round(take.bpm)} ${take.timeSig[0]}/${take.timeSig[1]}`;
 
 /** Hand the pending take to a song (the caller stores it). */
 export function claimPending(name: string): Take | null {
@@ -149,26 +249,53 @@ function resetJudging() {
   judgeFrom = 0;
 }
 
+/** Where a stopped guide sits: synced ones show bar 1 just past the play line. */
+function restPosition(take: Take | null): number {
+  const m = take && meterOf(take);
+  return m ? m.downbeatMs - 60000 / m.bpm : -GUIDE_LEAD_MS;
+}
+
 export function loadGuide(take: Take) {
-  guidePausedAt = -GUIDE_LEAD_MS;
+  cueMetronome(null);
+  guidePausedAt = restPosition(take);
   update({ guide: take, guidePlaying: false });
   resetJudging();
 }
 
 export function unloadGuide() {
+  cueMetronome(null);
   update({ guide: null, guidePlaying: false });
   resetJudging();
 }
 
+/** A saved take was edited: show the new version if it is the loaded guide. */
+export function refreshGuide(take: Take) {
+  if (snap.guide?.id !== take.id) return;
+  if (snap.guidePlaying) stopGuide();
+  guidePausedAt = restPosition(take);
+  update({ guide: take });
+}
+
 export function playGuide() {
-  if (!snap.guide) return;
-  guideStartAt = performance.now() + GUIDE_LEAD_MS;
+  const g = snap.guide;
+  if (!g) return;
+  const now = performance.now();
+  const m = meterOf(g);
+  if (m) {
+    // One bar of count-in before bar 1, heard ONSET_LAG_MS before the notes reach the line
+    const countIn = m.downbeatMs - barMs(m);
+    guideStartAt = now + Math.max(GUIDE_LEAD_MS, ONSET_LAG_MS + 150 - countIn);
+    cueMetronome({ bpm: g.bpm, timeSig: g.timeSig, startAt: guideStartAt + countIn - ONSET_LAG_MS });
+  } else {
+    guideStartAt = now + GUIDE_LEAD_MS;
+  }
   resetJudging();
   update({ guidePlaying: true });
 }
 
 export function stopGuide() {
-  guidePausedAt = -GUIDE_LEAD_MS;
+  cueMetronome(null);
+  guidePausedAt = restPosition(snap.guide);
   update({ guidePlaying: false });
 }
 
@@ -214,16 +341,19 @@ export function guideScore(): { hit: number; judged: number; total: number } {
 
 // ── MIDI ──────────────────────────────────────────────────────────────────────
 
+/** Synced takes are written with bar 1 on tick 0, so a DAW's bar lines match. */
 export function takeToMidi(take: Take): Uint8Array {
+  const m = meterOf(take);
+  const shift = m ? m.downbeatMs : 0;
   return encodeMidi({
     name: take.name,
-    bpm: take.bpm,
+    bpm: (take.bpm * 4) / take.timeSig[1],
     timeSig: take.timeSig,
     program: GM_CLEAN_GUITAR,
     channels: [0, 1, 2, 3, 4, 5],
-    text: STRING_CHANNEL_TAG,
+    texts: m ? [STRING_CHANNEL_TAG] : [STRING_CHANNEL_TAG, UNSYNCED_TAG],
     notes: take.notes.map(n => ({
-      midi: n.midi, startMs: n.startMs, durMs: n.durMs, velocity: n.velocity,
+      midi: n.midi, startMs: Math.max(0, n.startMs - shift), durMs: n.durMs, velocity: n.velocity,
       channel: n.string ?? 0,
     })),
   });
@@ -253,14 +383,18 @@ export function midiToTake(bytes: Uint8Array, fallbackName: string): Take {
   });
 
   const durationMs = Math.max(...notes.map(n => n.startMs + n.durMs));
+  // MIDI files carry a grid (tick 0 = bar 1) unless we exported them unsynced
+  const bpm = Math.round(((m.bpm * m.timeSig[1]) / 4) * 100) / 100;
+  const meter: Meter = { bpm, num: m.timeSig[0], den: m.timeSig[1], downbeatMs: -t0 };
   return {
     id: `take-${Date.now()}`,
     name: m.name || fallbackName,
     createdAt: Date.now(),
-    bpm: m.bpm,
+    bpm,
     timeSig: m.timeSig,
     durationMs,
     notes,
+    sync: m.texts.includes(UNSYNCED_TAG) ? null : { downbeatMs: normalizeDownbeat(meter, 0) },
   };
 }
 

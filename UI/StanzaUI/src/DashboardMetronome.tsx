@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, FC } from "react";
-import { setTempo } from "./takes";
+import { metronomeBeat, metronomeStopped, onMetronomeCue, setTempo } from "./takes";
 
 export type TimeSig = { beats: number; noteValue: number; label: string };
 
@@ -27,6 +27,19 @@ function defaultAccents(sig: TimeSig): boolean[] {
     accents[Math.floor(sig.beats / 2)] = true;
   }
   return accents;
+}
+
+/** AudioContext time → performance.now() ms, as heard at the speaker. */
+function audioToPerf(ctx: AudioContext, t: number): number {
+  const ts = ctx.getOutputTimestamp?.();
+  if (ts?.contextTime && ts.performanceTime) return ts.performanceTime + (t - ts.contextTime) * 1000;
+  return performance.now() + (t - ctx.currentTime + (ctx.outputLatency || ctx.baseLatency || 0)) * 1000;
+}
+
+function perfToAudio(ctx: AudioContext, perf: number): number {
+  const ts = ctx.getOutputTimestamp?.();
+  if (ts?.contextTime && ts.performanceTime) return ts.contextTime + (perf - ts.performanceTime) / 1000;
+  return ctx.currentTime + (perf - performance.now()) / 1000 - (ctx.outputLatency || ctx.baseLatency || 0);
 }
 
 const btnBase: React.CSSProperties = {
@@ -62,8 +75,14 @@ const DashboardMetronome: FC = () => {
   const beatsRef = useRef(sig.beats);
   const volumeRef = useRef(volume);
   const runningRef = useRef(false);
+  const sinceRef = useRef(0);     // when the current click grid took effect (performance.now() ms)
+  const cuedRef = useRef(false);  // started by guide playback
 
   useEffect(() => { bpmRef.current = bpm; }, [bpm]);
+  useEffect(() => {
+    // A tempo / metre change moves the grid; takes recorded across it are not synced
+    if (runningRef.current) sinceRef.current = Math.max(sinceRef.current, performance.now() + 150);
+  }, [bpm, sigIdx]);
   useEffect(() => { setTempo(bpm, sig.beats, sig.noteValue); }, [bpm, sig.beats, sig.noteValue]);
   useEffect(() => { accentsRef.current = accents; }, [accents]);
   useEffect(() => { beatsRef.current = sig.beats; }, [sig.beats]);
@@ -117,6 +136,7 @@ const DashboardMetronome: FC = () => {
       const beat = beatRef.current;
       const accented = accentsRef.current[beat] ?? false;
       scheduleClick(nextNoteRef.current, accented);
+      metronomeBeat(audioToPerf(ctx, nextNoteRef.current) - beat * secondsPerBeat * 1000, sinceRef.current);
       setActiveBeat(beat);
       beatRef.current = (beat + 1) % Math.max(1, beatsRef.current);
       nextNoteRef.current += secondsPerBeat;
@@ -125,6 +145,8 @@ const DashboardMetronome: FC = () => {
 
   const stop = useCallback(() => {
     runningRef.current = false;
+    cuedRef.current = false;
+    metronomeStopped();
     setRunning(false);
     if (timerRef.current) {
       clearInterval(timerRef.current);
@@ -133,15 +155,37 @@ const DashboardMetronome: FC = () => {
     setActiveBeat(-1);
   }, []);
 
-  const start = useCallback(() => {
+  /** Start clicking with beat 1 at `perfAt` (performance.now() ms), or right away. */
+  const start = useCallback((perfAt?: number) => {
     const ctx = ensureAudio();
+    if (timerRef.current) clearInterval(timerRef.current);
+    const spb = 60 / Math.max(20, bpmRef.current);
+    let t = perfAt === undefined ? ctx.currentTime + 0.05 : perfToAudio(ctx, perfAt);
     beatRef.current = 0;
-    nextNoteRef.current = ctx.currentTime + 0.05;
+    while (t < ctx.currentTime + 0.01) {
+      t += spb;
+      beatRef.current = (beatRef.current + 1) % Math.max(1, beatsRef.current);
+    }
+    nextNoteRef.current = t;
+    sinceRef.current = audioToPerf(ctx, t);
     runningRef.current = true;
     setRunning(true);
     scheduler();
     timerRef.current = setInterval(scheduler, 25);
   }, [ensureAudio, scheduler]);
+
+  // Guide playback of a synced take: take its tempo, count in and click along
+  useEffect(() => onMetronomeCue(cue => {
+    if (!cue) { if (cuedRef.current) stop(); return; }
+    const [beats, noteValue] = cue.timeSig;
+    const idx = TIME_SIGNATURES.findIndex(s => s.beats === beats && s.noteValue === noteValue);
+    if (idx >= 0) setSigIdx(idx);
+    setBpm(cue.bpm);
+    bpmRef.current = cue.bpm;
+    beatsRef.current = beats;
+    start(cue.startAt);
+    cuedRef.current = true;
+  }), [start, stop]);
 
   const toggle = useCallback(() => {
     if (runningRef.current) stop();
@@ -198,7 +242,7 @@ const DashboardMetronome: FC = () => {
             <span style={{
               fontFamily: "monospace", fontSize: 28, fontWeight: 800, top: "-12px",
               color: "#AFA9EC", lineHeight: 1, letterSpacing: "-0.02em", position: "relative",
-            }}>{bpm}</span>
+            }}>{Math.round(bpm)}</span>
             <input
               className="da-bpm-slider"
               type="range" min={40} max={240} step={1} value={bpm}

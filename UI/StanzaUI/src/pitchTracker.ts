@@ -34,6 +34,9 @@ const ONSET_TTL       = 10;
 const RELEASE_RATIO   = 0.05; // note ends when level drops below this fraction of its peak
 const MAX_NOTES       = 400;
 
+/** Rough delay from the pick to a note's `start` (YIN window filling, settle frames, stream). */
+export const ONSET_LAG_MS = 50;
+
 export interface NoteEvent {
   id: number;
   midi: number;
