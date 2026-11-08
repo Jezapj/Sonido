@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useIsLightMode } from "./UseTheme";
 import {
   beginRecording, discardPending, endRecording, exportTakeMidi, fmtDuration,
-  guideScore, playGuide, stopGuide, tempoLabel, unloadGuide, useTakes,
+  guideScore, playGuide, stopGuide, tempoLabel, toggleLiveSync, unloadGuide, useTakes,
 } from "./takes";
 
 const REC = "#ef4444";
@@ -42,6 +42,32 @@ export function RecButton({ connected, base }: { connected: boolean; base: React
         animation: t.recording ? "rse-pulse 1.1s infinite" : "none",
       }} />
       {t.recording ? `STOP ${fmtDuration(performance.now() - t.recordStartedAt)}` : "REC"}
+    </button>
+  );
+}
+
+/** Draw live notes on the metronome's grid (bars, note lengths) without recording. */
+export function SyncButton({ base }: { base: React.CSSProperties }) {
+  const t = useTakes();
+  const light = useIsLightMode();
+  const accent = light ? "#6d28d9" : "#AFA9EC";
+  const title = t.guide
+    ? "Follows the guide take while one is loaded"
+    : t.liveSync
+      ? "Back to free time"
+      : "Start the metronome and show what you play in time: bars and note lengths";
+  return (
+    <button
+      type="button"
+      onClick={toggleLiveSync}
+      title={title}
+      style={{
+        ...base,
+        opacity: t.guide ? 0.5 : 1,
+        ...(t.liveSync && { borderColor: accent, color: accent, background: "rgba(175,169,236,0.14)" }),
+      }}
+    >
+      ♩ SYNC
     </button>
   );
 }

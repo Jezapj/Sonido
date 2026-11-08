@@ -4,7 +4,7 @@ import { useSerialStream } from "./useSerialStream";
 import { useIsLightMode } from "./UseTheme";
 import { resetPitchTracker, startPitchTracker } from "./pitchTracker";
 import { NoteBarsView, NotationView, type NotationMode } from "./NoteViews";
-import TakeBar, { RecButton } from "./TakeBar";
+import TakeBar, { RecButton, SyncButton } from "./TakeBar";
 import { useTakes } from "./takes";
 
 const GUITAR_BUF = 1024;
@@ -612,6 +612,7 @@ export default function RustStreamExample() {
         </span>
 
         <RecButton connected={connected} base={btn} />
+        <SyncButton base={btn} />
 
         <button
           onClick={() => setMonOn(v => !v)}

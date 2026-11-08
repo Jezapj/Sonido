@@ -68,10 +68,11 @@ interface TakeSnapshot {
   pending: Take | null;
   guide: Take | null;
   guidePlaying: boolean;
+  liveSync: boolean;
 }
 
 let snap: TakeSnapshot = {
-  recording: false, recordStartedAt: 0, pending: null, guide: null, guidePlaying: false,
+  recording: false, recordStartedAt: 0, pending: null, guide: null, guidePlaying: false, liveSync: false,
 };
 const listeners = new Set<() => void>();
 
@@ -107,10 +108,55 @@ let metro = { running: false, downbeatAt: 0, since: Infinity, stoppedAt: -Infini
  *  current grid, `since` when that grid (tempo / phase) took effect. */
 export function metronomeBeat(downbeatAt: number, since: number) {
   metro = { running: true, downbeatAt, since, stoppedAt: -Infinity };
+  trackLiveGrid(downbeatAt, since);
 }
 
 export function metronomeStopped() {
   if (metro.running) metro = { ...metro, running: false, stoppedAt: performance.now() };
+  liveGrid = null;
+  if (snap.liveSync) update({ liveSync: false });
+}
+
+// ── Live sync (the note views follow the metronome without recording) ─────────
+
+export interface LiveGrid {
+  meter: Meter;    // downbeatMs is performance.now() ms of bar 1, in the detected-note timebase
+  since: number;   // identifies this grid: a tempo / metre change starts a new one, at bar 1
+}
+
+let liveGrid: LiveGrid | null = null;
+
+function trackLiveGrid(downbeatAt: number, since: number) {
+  const at = downbeatAt + ONSET_LAG_MS;
+  if (liveGrid?.since !== since) {
+    const m: Meter = { bpm: tempo.bpm, num: tempo.timeSig[0], den: tempo.timeSig[1], downbeatMs: at };
+    const bars = Math.floor((since + ONSET_LAG_MS - at + 5) / barMs(m));
+    liveGrid = { since, meter: { ...m, downbeatMs: at + bars * barMs(m) } };
+    return;
+  }
+  // Click timestamps wobble by a few ms; ease towards them so the bar lines don't
+  const m = liveGrid.meter;
+  const bMs = barMs(m);
+  const diff = at - m.downbeatMs;
+  const off = diff - Math.round(diff / bMs) * bMs;
+  liveGrid = { since, meter: { ...m, downbeatMs: m.downbeatMs + off * 0.1 } };
+}
+
+/** The grid to draw live notes on, or null when they run in free time. */
+export const getLiveGrid = (): LiveGrid | null => (snap.liveSync && metro.running ? liveGrid : null);
+
+const metronomeStartListeners = new Set<() => void>();
+
+export function onMetronomeStart(fn: () => void) {
+  metronomeStartListeners.add(fn);
+  return () => { metronomeStartListeners.delete(fn); };
+}
+
+/** Sync needs clicks, so switching it on starts the metronome; stopping the metronome ends it. */
+export function toggleLiveSync() {
+  if (snap.liveSync) { update({ liveSync: false }); return; }
+  update({ liveSync: true });
+  metronomeStartListeners.forEach(fn => fn());
 }
 
 export interface MetronomeCue {

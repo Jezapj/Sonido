@@ -26,6 +26,8 @@ export const tickMs = (m: Meter) => 60000 / m.bpm / beatTicks(m);
 export const barMs = (m: Meter) => barTicks(m) * tickMs(m);
 
 const isCompound = (m: Meter) => m.den === 8 && m.num % 3 === 0;
+/** The felt pulse: a beat, or a dotted quarter in compound time. */
+export const pulseTicks = (m: Meter) => (isCompound(m) ? 18 : beatTicks(m));
 /** Beaming / beat group: a beat in x/4, a dotted quarter in 6/8 etc., pairs of 8ths otherwise. */
 const groupTicks = (m: Meter) => (isCompound(m) ? 18 : TPQ);
 
@@ -93,7 +95,7 @@ export function quantize(notes: readonly TimedNote[], m: Meter): { notes: QNote[
   }
 
   const beat = beatTicks(m);
-  const pulse = isCompound(m) ? 18 : beat;
+  const pulse = pulseTicks(m);
   const out: QNote[] = [];
   for (let k = 0; k < kept.length; k++) {
     const n = kept[k];
@@ -183,12 +185,16 @@ function fits(m: Meter, a: number, v: Value, isTrip: (q: number) => boolean): bo
   return true;
 }
 
-export function buildScore(notes: readonly TimedNote[], m: Meter): Score {
+/** `until` (ticks) is for music still being played: rests stop there instead of
+ *  filling out the last bar, and the bar in progress counts as a bar. */
+export function buildScore(notes: readonly TimedNote[], m: Meter, until?: number): Score {
   const T = barTicks(m), G = groupTicks(m);
   const { notes: q, triplet } = quantize(notes, m);
   const isTrip = (quarter: number) => triplet.has(quarter);
   const lastEnd = q.length ? q[q.length - 1].end : T;
-  const bars = Math.max(1, Math.ceil(lastEnd / T));
+  const bars = until === undefined
+    ? Math.max(1, Math.ceil(lastEnd / T))
+    : Math.max(1, Math.floor(until / T) + 1);
   const glyphs: Glyph[] = [];
 
   const spell = (from: number, to: number, note: number) => {
@@ -227,7 +233,8 @@ export function buildScore(notes: readonly TimedNote[], m: Meter): Score {
     spell(n.start, n.end, n.note);
     at = n.end;
   }
-  if (at < bars * T) spell(at, bars * T, -1);
+  const restsTo = until ?? bars * T;
+  if (at < restsTo) spell(at, restsTo, -1);
 
   // Beam runs of 8ths / 16ths inside one beat group; rests break a beam
   const beams: number[][] = [];

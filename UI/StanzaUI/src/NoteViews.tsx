@@ -3,10 +3,16 @@ import { useIsLightMode } from "./UseTheme";
 import { markClickHandled } from "./focusGuard";
 import { midiToName, NOTE_NAMES, STRING_LABELS } from "./music";
 import {
-  getActiveNote, getNotes, getPitchFrame, getTrackerEpoch, type NoteEvent,
+  getActiveNote, getNotes, getPitchFrame, getTrackerEpoch, ONSET_LAG_MS, type NoteEvent,
 } from "./pitchTracker";
-import { getGuide, guideJudgement, guideTime, judgeGuide, meterOf, type Take, type TakeNote } from "./takes";
-import { barMs, buildScore, tickMs, TPQ, type Glyph, type Meter, type NoteValue, type Score } from "./rhythm";
+import {
+  getGuide, getLiveGrid, guideJudgement, guideTime, judgeGuide, meterOf,
+  type LiveGrid, type Take, type TakeNote,
+} from "./takes";
+import {
+  barMs, beatTicks, buildScore, pulseTicks, tickMs, TPQ,
+  type Glyph, type Meter, type NoteValue, type Score,
+} from "./rhythm";
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -121,11 +127,11 @@ const canvasStyle: React.CSSProperties = {
 
 const TEMPO_LABEL_W = 110;
 
-function drawTempo(ctx: CanvasRenderingContext2D, w: number, p: Palette, m: Meter) {
+function drawTempo(ctx: CanvasRenderingContext2D, w: number, color: string, m: Meter) {
   ctx.font = "600 11px monospace";
   ctx.textAlign = "right";
   ctx.textBaseline = "top";
-  ctx.fillStyle = p.guide;
+  ctx.fillStyle = color;
   ctx.fillText(`${m.den === 8 ? "♪" : "♩"} = ${Math.round(m.bpm)}   ${m.num}/${m.den}`, w - 6, 5);
 }
 
@@ -135,6 +141,8 @@ interface BarLineStyle {
   numY: number;
   fontPx: number;
   alphaAt: (x: number) => number;
+  barBase?: number;   // bars before xOfBar(0), for numbering
+  final?: boolean;    // false while the music is still going: no closing double bar
 }
 
 /** Bar lines with bar numbers; `xOfBar(k)` is where bar k + 1 starts, bar `bars` ends with a final double bar. */
@@ -147,7 +155,8 @@ function drawBarLines(
   ctx.font = `${s.fontPx}px monospace`;
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
-  for (let k = 0; k <= bars; k++) {
+  const lastLine = s.final === false ? bars - 1 : bars;
+  for (let k = 0; k <= lastLine; k++) {
     const x = Math.round(xOfBar(k)) + 0.5;
     if (x < -6 || x > w + 6) continue;
     const a = s.alphaAt(x);
@@ -159,7 +168,7 @@ function drawBarLines(
       ctx.lineWidth = 3;
       ctx.beginPath(); ctx.moveTo(x + 4, s.y0); ctx.lineTo(x + 4, s.y1); ctx.stroke();
     } else if (x < w - TEMPO_LABEL_W) {
-      ctx.fillText(String(k + 1), x + 3, s.numY);
+      ctx.fillText(String(k + 1 + (s.barBase ?? 0)), x + 3, s.numY);
     }
   }
   ctx.globalAlpha = 1;
@@ -188,10 +197,10 @@ interface ScoreView {
 
 const scoreViews = new WeakMap<Take, ScoreView>();
 
-function scoreView(take: Take, meter: Meter): ScoreView {
+function scoreView(take: Take, meter: Meter, until?: number): ScoreView {
   const cached = scoreViews.get(take);
   if (cached) return cached;
-  const score = buildScore(take.notes, meter);
+  const score = buildScore(take.notes, meter, until);
   const { glyphs, barTicks: T } = score;
   const start = take.notes.map(() => NaN), end = take.notes.map(() => NaN);
   for (const q of score.notes) { start[q.note] = q.start; end[q.note] = q.end; }
@@ -256,6 +265,62 @@ interface SyncedGuide {
   alphaAt: (x: number) => number;
   color: (note: number) => string;    // note -1 = rest
   active: (note: number) => boolean;  // sounding at the play line
+  barBase: number;
+  final: boolean;
+}
+
+/** Live synced view: the fixed width of a tick, in staff spaces (a 16th is three ticks). */
+const LIVE_TICK_SPACES = 0.7;
+
+interface LiveScore {
+  key: string;
+  sv: ScoreView;
+  src: NoteEvent[];     // the notes behind sv.take.notes, same order
+  firstBar: number;     // bars of the grid before tick 0
+}
+
+/**
+ * What was just played, spelled on the metronome grid. Windows on whole bars,
+ * so scrolling never changes how the visible bars read, and is only rebuilt
+ * when a note changes or a 16th has passed.
+ */
+function liveScore(
+  ref: { current: LiveScore | null }, notes: readonly NoteEvent[], grid: LiveGrid, now: number, visibleMs: number,
+): LiveScore {
+  const tMs = tickMs(grid.meter), bMs = barMs(grid.meter);
+  const firstBar = Math.max(0, Math.floor((now - visibleMs - grid.meter.downbeatMs) / bMs) - 1);
+  const winStart = grid.meter.downbeatMs + firstBar * bMs;
+  const minStart = Math.max(winStart, grid.since + ONSET_LAG_MS) - 1.5 * tMs;
+
+  let from = notes.length;
+  while (from > 0 && notes[from - 1].start >= minStart) from--;
+  const last = notes[notes.length - 1];
+  const nowTick = (now - winStart) / tMs;
+  const key = [grid.since, firstBar, notes.length - from, last?.id, last?.end === null, Math.floor(nowTick / 3)].join();
+  if (ref.current?.key === key) return ref.current;
+
+  const meter: Meter = { ...grid.meter, downbeatMs: winStart };
+  const pulse = pulseTicks(meter);
+  const src = notes.slice(from);
+  const take: Take = {
+    id: "live", name: "", createdAt: 0, bpm: meter.bpm, timeSig: [meter.num, meter.den], durationMs: 0,
+    sync: { downbeatMs: winStart },
+    notes: src.map(n => {
+      let durMs: number;
+      if (n.end !== null) {
+        durMs = n.end - n.start;
+      } else {
+        // Still sounding: only whole pulses (or 16ths) so far, so it never shows a length it hasn't reached
+        const startTick = (n.start - winStart) / tMs;
+        const endTick = nowTick - startTick >= pulse ? Math.floor(nowTick / pulse) * pulse : Math.floor(nowTick / 3) * 3;
+        durMs = Math.max(1, (endTick - startTick) * tMs);
+      }
+      return { midi: n.midi, startMs: n.start, durMs, velocity: 0, string: n.string, fret: n.fret };
+    }),
+  };
+  const beat = beatTicks(meter);
+  const until = Math.max(0, Math.floor(nowTick / beat) * beat);
+  return (ref.current = { key, sv: scoreView(take, meter, until), src, firstBar });
 }
 
 // ── Bars (horizontal rhythm-game / piano-roll) ────────────────────────────────
@@ -279,6 +344,7 @@ export function NoteBarsView({ active }: { active: boolean }) {
     const cur = getActiveNote();
     const guide = getGuide();
     const meter = guide ? meterOf(guide) : null;
+    const grid = guide ? null : getLiveGrid();
     const gt = guide ? guideTime(now) : 0;
     if (guide) judgeGuide(notes, now);
 
@@ -351,6 +417,13 @@ export function NoteBarsView({ active }: { active: boolean }) {
       drawBarLines(ctx, w, p, scoreView(guide, meter).score.bars,
         k => nowX + ((meter.downbeatMs + k * bMs - gt) / 1000) * pps,
         { y0: 0, y1: h, numY: 10, fontPx: 10, alphaAt: () => 1 });
+    } else if (grid) {
+      const m = grid.meter, bMs = barMs(m);
+      const first = Math.max(0, Math.floor((now - BAR_VISIBLE_SECS * 1000 - m.downbeatMs) / bMs));
+      const bars = Math.floor((now - m.downbeatMs) / bMs) - first + 1;
+      drawBarLines(ctx, w, p, bars,
+        k => nowX - ((now - (m.downbeatMs + (first + k) * bMs)) / 1000) * pps,
+        { y0: 0, y1: h, numY: 10, fontPx: 10, alphaAt: () => 1, barBase: first, final: false });
     }
 
     const barH = clamp(rowH * 0.72, 4, 18);
@@ -417,7 +490,8 @@ export function NoteBarsView({ active }: { active: boolean }) {
     ctx.fillStyle = p.dim;
     for (const [t, y] of labels) ctx.fillText(t, 4, y);
 
-    if (meter) drawTempo(ctx, w, p, meter);
+    if (meter) drawTempo(ctx, w, p.guide, meter);
+    else if (grid) drawTempo(ctx, w, p.accent, grid.meter);
     if (visible.length === 0 && !fr.voiced && !guide) hint(ctx, w, h, p, "play a note…");
   });
 
@@ -512,6 +586,7 @@ export function NotationView({ active, mode }: { active: boolean; mode: Notation
   const clefHitRef = useRef({ x: 0, y: 0, w: 0, h: 0 });
   const layoutRef = useRef<ScoreLayout>({ epoch: -1, pos: new Map(), lastPos: 0, scroll: 0, lastTime: 0 });
   const guideLayoutRef = useRef<GuideLayout | null>(null);
+  const liveScoreRef = useRef<LiveScore | null>(null);
 
   useRaf(active, () => {
     const fit = fitCanvas(canvasRef.current);
@@ -549,7 +624,8 @@ export function NotationView({ active, mode }: { active: boolean; mode: Notation
     if (L.lastPos > L.scroll) L.scroll += (L.lastPos - L.scroll) * 0.2;
 
     const guide = getGuide();
-    const meter = guide ? meterOf(guide) : null;
+    const grid = guide ? null : getLiveGrid();
+    const meter = guide ? meterOf(guide) : grid?.meter ?? null;
     if (guide) judgeGuide(notes, now);
 
     const spawnX = guide ? Math.round(w * GUIDE_LINE_FRAC) : w - 18;
@@ -557,7 +633,9 @@ export function NotationView({ active, mode }: { active: boolean; mode: Notation
     // A synced guide scrolls at a steady speed (its closest notes ≈ 2.2 staff spaces apart),
     // so live notes are placed by time too
     const sv = guide && meter ? scoreView(guide, meter) : null;
-    const pxPerMs = sv ? Math.max((g * 2.2) / sv.minSpacing, g * 0.4) / sv.tMs : 0;
+    const pxPerMs = sv
+      ? Math.max((g * 2.2) / sv.minSpacing, g * 0.4) / sv.tMs
+      : grid ? (g * LIVE_TICK_SPACES) / tickMs(grid.meter) : 0;
     const xOf = meter
       ? (n: NoteEvent) => spawnX - (now - n.start) * pxPerMs
       : (n: NoteEvent) => spawnX - (L.scroll - (L.pos.get(n.id) ?? L.scroll));
@@ -576,6 +654,21 @@ export function NotationView({ active, mode }: { active: boolean; mode: Notation
         alphaAt: guideAlphaAt,
         color: i => (i < 0 ? p.guide : guideColor(p, i)),
         active: i => gt >= msOf(sv.start[i]) && gt < msOf(sv.end[i]),
+        barBase: 0,
+        final: true,
+      };
+    } else if (grid) {
+      // Live on the metronome grid: spelled like a take, with now at the cursor
+      const live = liveScore(liveScoreRef, notes, grid, now, (spawnX - headerW) / pxPerMs);
+      const { downbeatMs } = live.sv.meter, tMs = live.sv.tMs;
+      synced = {
+        sv: live.sv,
+        xOfTick: t => spawnX + (downbeatMs + t * tMs - now) * pxPerMs,
+        alphaAt,
+        color: i => (i < 0 ? p.dim : live.src[i] === cur ? p.accent : p.ink),
+        active: i => live.src[i] === cur,
+        barBase: live.firstBar,
+        final: false,
       };
     } else if (guide) {
       // Guide notes cross the play line exactly at their recorded time; dense runs are spread out
@@ -604,15 +697,15 @@ export function NotationView({ active, mode }: { active: boolean; mode: Notation
       drawTabFrame(ctx, w, h, p, headerW);
       if (synced) drawSyncedTab(ctx, w, h, p, synced);
       else if (guide && guideStyle) drawTabNotes(ctx, w, h, guide.notes, guideStyle);
-      drawTabNotes(ctx, w, h, notes, liveStyle);
+      if (!grid) drawTabNotes(ctx, w, h, notes, liveStyle);
     } else {
       const frame = drawStaffFrame(ctx, w, h, g, p, clefRef.current, clefHitRef.current, meter);
       if (synced) drawScore(ctx, w, g, p, frame, synced, clefRef.current);
       else if (guide && guideStyle) drawStaffNotes(ctx, w, g, frame, guide.notes, guideStyle, clefRef.current);
-      drawStaffNotes(ctx, w, g, frame, notes, liveStyle, clefRef.current);
+      if (!grid) drawStaffNotes(ctx, w, g, frame, notes, liveStyle, clefRef.current);
     }
 
-    if (meter) drawTempo(ctx, w, p, meter);
+    if (meter) drawTempo(ctx, w, guide ? p.guide : p.accent, meter);
     if (notes.length === 0 && !guide) hint(ctx, w, h, p, "play a note…");
   });
 
@@ -792,7 +885,10 @@ function drawScore(
   drawBarLines(ctx, w, p, bars, k => {
     const first = sv.barFirst[k];
     return sg.xOfTick(k * T) - g * (first !== undefined && sv.acc[first] ? 2.1 : 1.1);
-  }, { y0: yOfPos(8), y1: yOfPos(0), numY: yOfPos(8) - g * 0.8, fontPx: clamp(g * 0.8, 8, 12), alphaAt: sg.alphaAt });
+  }, {
+    y0: yOfPos(8), y1: yOfPos(0), numY: yOfPos(8) - g * 0.8, fontPx: clamp(g * 0.8, 8, 12),
+    alphaAt: sg.alphaAt, barBase: sg.barBase, final: sg.final,
+  });
 
   for (let i = 0; i < glyphs.length; i++) {
     const gl = glyphs[i];
@@ -937,7 +1033,7 @@ function drawScore(
     const a = sg.alphaAt(mid);
     if (a <= 0) continue;
     ctx.globalAlpha = a;
-    ctx.fillStyle = p.guide;
+    ctx.fillStyle = sg.color(-1);
     ctx.fillText("3", mid, top);
   }
   ctx.globalAlpha = 1;
@@ -950,7 +1046,10 @@ function drawSyncedTab(ctx: CanvasRenderingContext2D, w: number, h: number, p: P
   const fs = clamp(s * 0.72, 9, 22);
   const T = sv.score.barTicks;
   drawBarLines(ctx, w, p, sv.score.bars, k => sg.xOfTick(k * T) - fs * 0.9,
-    { y0: top, y1: top + 5 * s, numY: top - s * 0.7, fontPx: clamp(s * 0.5, 8, 11), alphaAt: sg.alphaAt });
+    {
+      y0: top, y1: top + 5 * s, numY: top - s * 0.7, fontPx: clamp(s * 0.5, 8, 11),
+      alphaAt: sg.alphaAt, barBase: sg.barBase, final: sg.final,
+    });
   const at = (n: TakeNote) => sv.index.get(n) ?? 0;
   drawTabNotes(ctx, w, h, sv.kept, {
     xOf: n => sg.xOfTick(sv.start[at(n)]),

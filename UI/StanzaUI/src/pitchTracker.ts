@@ -35,7 +35,7 @@ const RELEASE_RATIO   = 0.05; // note ends when level drops below this fraction 
 const MAX_NOTES       = 400;
 
 /** Rough delay from the pick to a note's `start` (YIN window filling, settle frames, stream). */
-export const ONSET_LAG_MS = 50;
+export const ONSET_LAG_MS = 75;
 
 export interface NoteEvent {
   id: number;

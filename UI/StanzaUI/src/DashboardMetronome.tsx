@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, FC } from "react";
-import { metronomeBeat, metronomeStopped, onMetronomeCue, setTempo } from "./takes";
+import { metronomeBeat, metronomeStopped, onMetronomeCue, onMetronomeStart, setTempo } from "./takes";
 
 export type TimeSig = { beats: number; noteValue: number; label: string };
 
@@ -173,6 +173,8 @@ const DashboardMetronome: FC = () => {
     scheduler();
     timerRef.current = setInterval(scheduler, 25);
   }, [ensureAudio, scheduler]);
+
+  useEffect(() => onMetronomeStart(() => { if (!runningRef.current) start(); }), [start]);
 
   // Guide playback of a synced take: take its tempo, count in and click along
   useEffect(() => onMetronomeCue(cue => {
