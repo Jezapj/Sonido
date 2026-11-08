@@ -9,6 +9,7 @@
 
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { mergeVertices } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import leftUrl from "./assets/hands/left.glb?url";
 import rightUrl from "./assets/hands/right.glb?url";
 
@@ -44,10 +45,17 @@ const THUMB_CURL_SHARE = [0, 0.5, 0.8];   // the thumb stays out to the side ins
 const MAX_CURL = 1.05;
 const MAX_YAW = 0.4;
 const MAX_THUMB_YAW = 0.75;
-const THUMB_CURL = 0.3;
+const THUMB_CURL = 0.4;
+
+// Proportions, relative to the model as supplied
+const PALM_LENGTH = 0.88;
+const FINGER_LENGTH = 1.14;
+const THUMB_LENGTH = 1.06;
+const FINGER_WIDTH = 0.8;                 // side to side
+const FINGER_DEPTH = 0.88;                // back of the finger to its pad
 
 const X_AXIS = new THREE.Vector3(1, 0, 0);
-const NAIL_SHAPE = new THREE.SphereGeometry(1, 16, 12);
+const NAIL_SHAPE = new THREE.SphereGeometry(1, 10, 12);
 
 /** Where a finger starts and how long it is, in metres from the middle knuckle (screen axes, y down). */
 export interface FingerGeom { baseX: number; baseY: number; length: number; }
@@ -91,6 +99,92 @@ export interface RigFrame {
   look: HandLook;
 }
 
+/**
+ * Slims and lengthens the fingers and shortens the palm, moving the skin and the
+ * joints together. Works on the rest pose, so it has to run before the bones are chained.
+ */
+function reproportion(mesh: THREE.SkinnedMesh, wrist: THREE.Bone, chains: THREE.Bone[][]) {
+  type Warp = (v: THREE.Vector3) => THREE.Vector3;   // overwrites and returns v
+  const origin = wrist.position.clone();
+  const palmAxis = chains[2][1].position.clone().sub(origin).normalize();
+  const shortenPalm: Warp = v =>
+    v.addScaledVector(palmAxis, (PALM_LENGTH - 1) * Math.max(0, v.clone().sub(origin).dot(palmAxis)));
+
+  const warps = new Map<THREE.Object3D, Warp>();
+  const moved = new Map<THREE.Object3D, THREE.Vector3>();
+  for (const bone of [wrist, ...chains.map(chain => chain[0])]) {
+    warps.set(bone, shortenPalm);
+    moved.set(bone, shortenPalm(bone.position.clone()));
+  }
+
+  chains.forEach((chain, f) => {
+    const stretch = f === THUMB ? THUMB_LENGTH : FINGER_LENGTH;
+    let start = shortenPalm(chain[1].position.clone());
+    moved.set(chain[1], start);
+    for (let i = 1; i + 1 < chain.length; i++) {
+      const from = chain[i].position.clone(), to = start;
+      const segment = chain[i + 1].position.clone().sub(from);
+      const along = segment.clone().normalize();
+      const depth = new THREE.Vector3().crossVectors(along, X_AXIS.clone().applyQuaternion(chain[i].quaternion)).normalize();
+      const across = new THREE.Vector3().crossVectors(depth, along);
+      warps.set(chain[i], v => {
+        v.sub(from);
+        const a = v.dot(along), s = v.dot(across), d = v.dot(depth);
+        return v.copy(to)
+          .addScaledVector(along, a * stretch)
+          .addScaledVector(across, s * FINGER_WIDTH)
+          .addScaledVector(depth, d * FINGER_DEPTH);
+      });
+      start = to.clone().addScaledVector(segment, stretch);
+      moved.set(chain[i + 1], start);
+    }
+    warps.set(chain[chain.length - 1], warps.get(chain[chain.length - 2])!);
+  });
+
+  // Each vertex follows the bones it's weighted to, which keeps the webbing between fingers smooth
+  const { bones, boneInverses } = mesh.skeleton;
+  const position = mesh.geometry.getAttribute("position");
+  const skinIndex = mesh.geometry.getAttribute("skinIndex");
+  const skinWeight = mesh.geometry.getAttribute("skinWeight");
+  const rest = new THREE.Vector3(), v = new THREE.Vector3(), sum = new THREE.Vector3();
+  for (let i = 0; i < position.count; i++) {
+    rest.fromBufferAttribute(position, i);
+    sum.set(0, 0, 0);
+    let total = 0;
+    for (let k = 0; k < 4; k++) {
+      const weight = skinWeight.getComponent(i, k);
+      if (!weight) continue;
+      sum.addScaledVector(warps.get(bones[skinIndex.getComponent(i, k)])!(v.copy(rest)), weight);
+      total += weight;
+    }
+    position.setXYZ(i, sum.x / total, sum.y / total, sum.z / total);
+  }
+  position.needsUpdate = true;
+
+  bones.forEach((bone, i) => {
+    const to = moved.get(bone)!;
+    boneInverses[i].multiply(new THREE.Matrix4().makeTranslation(bone.position.x - to.x, bone.position.y - to.y, bone.position.z - to.z));
+    bone.position.copy(to);
+  });
+}
+
+/** A thin nail that bends around a fingertip of the given radius. */
+function curvedNail(halfWidth: number, thickness: number, halfLength: number, radius: number) {
+  const sphere = new THREE.SphereGeometry(1, 20, 14);
+  sphere.deleteAttribute("uv");
+  sphere.deleteAttribute("normal");
+  const shape = mergeVertices(sphere);
+  const p = shape.getAttribute("position");
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i) * halfWidth, z = p.getZ(i) * halfLength;
+    const wrap = Math.sqrt(Math.max(0, radius * radius - x * x)) - radius;
+    const dip = 0.22 * z * z / halfLength;
+    p.setXYZ(i, x, p.getY(i) * thickness + wrap - dip, z);
+  }
+  shape.computeVertexNormals();
+  return shape;
+}
+
 function buildHand(
   root: THREE.Object3D, side: 1 | -1, material: THREE.Material, hullMat: THREE.Material,
   maskMat: THREE.Material, nailMat: THREE.Material,
@@ -102,10 +196,16 @@ function buildHand(
     return b as THREE.Bone;
   };
   const wrist = root.getObjectByName("wrist") as THREE.Bone;
+  const chains = FINGER_NAMES.map((_, f) => (f === THUMB ? THUMB_JOINTS : JOINTS).map(j => named(f, j)));
+
+  let skin: THREE.SkinnedMesh | null = null;
+  root.traverse(o => { if ((o as THREE.SkinnedMesh).isSkinnedMesh) skin = o as THREE.SkinnedMesh; });
+  if (!skin) throw new Error("hand model has no skinned mesh");
+  const mesh = skin as THREE.SkinnedMesh;
+  reproportion(mesh, wrist, chains);
 
   // The file's bones are all siblings in model space. Remember each one's pose,
   // then chain them so that turning a joint carries everything beyond it.
-  const chains = FINGER_NAMES.map((_, f) => (f === THUMB ? THUMB_JOINTS : JOINTS).map(j => named(f, j)));
   const P = new Map<THREE.Object3D, THREE.Vector3>();
   const Q = new Map<THREE.Object3D, THREE.Quaternion>();
   for (const b of [wrist, ...chains.flat()]) { P.set(b, b.position.clone()); Q.set(b, b.quaternion.clone()); }
@@ -164,10 +264,6 @@ function buildHand(
     return { baseX: base.dot(screenRight), baseY: -base.dot(up), length: rig.lengths.reduce((a, b) => a + b, 0) };
   });
 
-  let skin: THREE.SkinnedMesh | null = null;
-  root.traverse(o => { if ((o as THREE.SkinnedMesh).isSkinnedMesh) skin = o as THREE.SkinnedMesh; });
-  if (!skin) throw new Error("hand model has no skinned mesh");
-  const mesh = skin as THREE.SkinnedMesh;
   mesh.frustumCulled = false;
   mesh.material = material;
 
@@ -185,13 +281,21 @@ function buildHand(
   // The mesh has no nails, so each fingertip gets one, seated on the skin
   const positions = mesh.geometry.getAttribute("position");
   const skinIndex = mesh.geometry.getAttribute("skinIndex");
-  const nails = chains.map(chain => {
+  const nails = chains.map((chain, f) => {
+    const thumb = f === THUMB;
     const distal = chain[chain.length - 2], tip = chain[chain.length - 1];
     const pd = P.get(distal)!, along = P.get(tip)!.clone().sub(pd);
     const length = along.length();
-    const centre = pd.clone().addScaledVector(along, 0.62);
+    const centre = pd.clone().addScaledVector(along, thumb ? 0.5 : 0.62);
     const axis = along.clone().normalize();
-    const lateral = new THREE.Vector3().crossVectors(back, axis).normalize();
+    // The thumb lies on its side, so its nail faces halfway between the back of the hand and away from the way it bends
+    const dorsal = back.clone();
+    if (thumb) {
+      const curl = fingers[THUMB].curl[fingers[THUMB].curl.length - 1];
+      dorsal.add(X_AXIS.clone().applyQuaternion(Q.get(distal)!).cross(axis).multiplyScalar(-curl.sign).normalize());
+      dorsal.addScaledVector(axis, -dorsal.dot(axis)).normalize();
+    }
+    const lateral = new THREE.Vector3().crossVectors(dorsal, axis).normalize();
     const own = new Set([mesh.skeleton.bones.indexOf(distal), mesh.skeleton.bones.indexOf(tip)]);
     let height = 0, halfWidth = 0;
     const v = new THREE.Vector3();
@@ -199,16 +303,19 @@ function buildHand(
       if (!own.has(skinIndex.getX(i))) continue;   // this finger's skin only
       v.fromBufferAttribute(positions, i).sub(centre);
       if (Math.abs(v.dot(axis)) > length * 0.3) continue;
-      height = Math.max(height, v.dot(back));
+      height = Math.max(height, v.dot(dorsal));
       halfWidth = Math.max(halfWidth, Math.abs(v.dot(lateral)));
     }
-    const nail = new THREE.Mesh(NAIL_SHAPE, nailMat);
-    const inv = Q.get(distal)!.clone().invert();
-    nail.position.copy(centre).addScaledVector(back, height * 1.04).sub(pd).applyQuaternion(inv);
-    nail.quaternion.copy(inv).multiply(
-      new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(lateral, back, axis)),
+    const nail = new THREE.Mesh(
+      thumb ? curvedNail(halfWidth * 0.68, height * 0.1, length * 0.62, halfWidth) : NAIL_SHAPE,
+      nailMat,
     );
-    nail.scale.set(halfWidth * 0.74, height * 0.16, length * 0.46);
+    const inv = Q.get(distal)!.clone().invert();
+    nail.position.copy(centre).addScaledVector(dorsal, height * (thumb ? 1.3 : 1.34)).sub(pd).applyQuaternion(inv);
+    nail.quaternion.copy(inv).multiply(
+      new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(lateral, dorsal, axis)),
+    );
+    if (!thumb) nail.scale.set(halfWidth * 0.54, height * 0.16, length * 0.76 / FINGER_LENGTH);
     distal.add(nail);
     return nail;
   });
