@@ -72,7 +72,7 @@ const guideColor = (p: Palette, i: number) => {
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
 /** Match the backing store to the element's CSS size × DPR and return a CSS-pixel context. */
-function fitCanvas(canvas: HTMLCanvasElement | null) {
+export function fitCanvas(canvas: HTMLCanvasElement | null) {
   if (!canvas) return null;
   const w = canvas.clientWidth, h = canvas.clientHeight;
   if (!w || !h) return null;
@@ -86,7 +86,7 @@ function fitCanvas(canvas: HTMLCanvasElement | null) {
   return { ctx, w, h };
 }
 
-function useRaf(active: boolean, draw: () => void) {
+export function useRaf(active: boolean, draw: () => void) {
   const drawRef = useRef(draw);
   drawRef.current = draw;
   useEffect(() => {
@@ -98,7 +98,7 @@ function useRaf(active: boolean, draw: () => void) {
   }, [active]);
 }
 
-function usePalette() {
+export function usePalette() {
   const light = useIsLightMode();
   const ref = useRef<Palette>(light ? LIGHT : DARK);
   ref.current = light ? LIGHT : DARK;
@@ -113,13 +113,13 @@ function hint(ctx: CanvasRenderingContext2D, w: number, h: number, pal: Palette,
   ctx.fillText(text, w / 2, h / 2);
 }
 
-const frameStyle = (pal: Palette): React.CSSProperties => ({
+export const frameStyle = (pal: Palette): React.CSSProperties => ({
   position: "relative", flex: 1, minHeight: 0,
   border: `0.5px solid ${pal.border}`, borderRadius: 10, overflow: "hidden",
   marginBottom: 8,
 });
 
-const canvasStyle: React.CSSProperties = {
+export const canvasStyle: React.CSSProperties = {
   position: "absolute", inset: 0, width: "100%", height: "100%", display: "block",
 };
 
@@ -127,7 +127,7 @@ const canvasStyle: React.CSSProperties = {
 
 const TEMPO_LABEL_W = 110;
 
-function drawTempo(ctx: CanvasRenderingContext2D, w: number, color: string, m: Meter) {
+export function drawTempo(ctx: CanvasRenderingContext2D, w: number, color: string, m: Meter) {
   ctx.font = "600 11px monospace";
   ctx.textAlign = "right";
   ctx.textBaseline = "top";

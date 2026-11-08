@@ -4,13 +4,17 @@ import { useSerialStream } from "./useSerialStream";
 import { useIsLightMode } from "./UseTheme";
 import { resetPitchTracker, startPitchTracker } from "./pitchTracker";
 import { NoteBarsView, NotationView, type NotationMode } from "./NoteViews";
+import { PianoHandControls, PianoView } from "./PianoView";
+import { HAND_TONES, type HandLook } from "./handRig";
 import TakeBar, { RecButton, SyncButton } from "./TakeBar";
 import { useTakes } from "./takes";
 
 const GUITAR_BUF = 1024;
 const FS = 47991;
 
-const VIEW_LABELS = ["WAVE", "BARS", "SCORE"];
+const VIEW_LABELS = ["WAVE", "BARS", "SCORE", "PIANO"];
+const LS_HANDS_ON = "stanza-piano-hands-on";
+const LS_HAND_LOOK = "stanza-piano-hand-look";
 const VIEW_COUNT = VIEW_LABELS.length;
 const SWIPE_THRESHOLD = 48;
 
@@ -119,6 +123,21 @@ export default function RustStreamExample() {
   const light = useIsLightMode();
   const [view, setView] = useState(0);
   const [scoreMode, setScoreMode] = useState<NotationMode>("staff");
+  const [handsOn, setHandsOn] = useState(() => {
+    try { return localStorage.getItem(LS_HANDS_ON) === "1"; } catch { return false; }
+  });
+  const [handLook, setHandLook] = useState<HandLook>(() => {
+    try {
+      const saved = localStorage.getItem(LS_HAND_LOOK);
+      return saved && saved in HAND_TONES ? (saved as HandLook) : "outline";
+    } catch { return "outline"; }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(LS_HANDS_ON, handsOn ? "1" : "0");
+      localStorage.setItem(LS_HAND_LOOK, handLook);
+    } catch {}
+  }, [handsOn, handLook]);
   const [dragX, setDragX] = useState(0);
   const [dragging, setDragging] = useState(false);
   const dragStartX = useRef(0);
@@ -594,6 +613,16 @@ export default function RustStreamExample() {
               ))}
             </div>
           )}
+          {view === 3 && (
+            <PianoHandControls
+              on={handsOn}
+              look={handLook}
+              onToggle={() => setHandsOn(v => !v)}
+              onLook={setHandLook}
+              base={btn}
+              accent={viewAccent}
+            />
+          )}
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -721,6 +750,9 @@ export default function RustStreamExample() {
       </div>
       <div style={{ width: `${100 / VIEW_COUNT}%`, minWidth: 0, display: "flex", flexDirection: "column" }}>
         <NotationView active={view === 2 || dragging} mode={scoreMode} />
+      </div>
+      <div style={{ width: `${100 / VIEW_COUNT}%`, minWidth: 0, display: "flex", flexDirection: "column" }}>
+        <PianoView active={view === 3 || dragging} hands={handsOn ? handLook : null} />
       </div>
       </div>
       </div>
