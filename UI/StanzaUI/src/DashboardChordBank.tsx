@@ -235,7 +235,9 @@ function TakeSyncEditor({ take, onChange }: { take: Take; onChange: (next: Take)
   );
 }
 
-const DashboardChordBank: FC = () => {
+const DashboardChordBank: FC<{ size?: { w: number; h: number } }> = ({ size }) => {
+  const panelW = size?.w ?? 300, panelH = size?.h ?? 168;
+  const roomy = panelW > 420;   // focused: verses flow into columns
   const [songs, setSongs] = useState<Song[]>(() => loadBank().songs);
   const [folders, setFolders] = useState<SongFolder[]>(() => loadBank().folders);
   const [mode, setMode] = useState<Mode>("list");
@@ -476,7 +478,7 @@ const DashboardChordBank: FC = () => {
   if (mode === "list") {
     return (
       <div className="da-chords" style={{
-        width: 300, height: 168, display: "flex", flexDirection: "column",
+        width: panelW, height: panelH, display: "flex", flexDirection: "column",
         gap: 6, boxSizing: "border-box", userSelect: "none",
       }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
@@ -614,7 +616,7 @@ const DashboardChordBank: FC = () => {
   if (mode === "edit") {
     return (
       <div className="da-chords" style={{
-        width: 300, height: 168, display: "flex", flexDirection: "column",
+        width: panelW, height: panelH, display: "flex", flexDirection: "column",
         gap: 4, boxSizing: "border-box", userSelect: "none",
       }}>
         <div style={{ display: "flex", gap: 4 }}>
@@ -682,7 +684,7 @@ const DashboardChordBank: FC = () => {
 
   return (
     <div className="da-chords" style={{
-      width: 300, height: 168, display: "flex", flexDirection: "column",
+      width: panelW, height: panelH, display: "flex", flexDirection: "column",
       gap: 4, boxSizing: "border-box", userSelect: "none",
     }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -881,11 +883,11 @@ const DashboardChordBank: FC = () => {
       ) : (
       <div className="da-songs-scroll" style={{
         flex: 1, overflowY: "auto", minHeight: 0,
-        display: "flex", flexDirection: "column", gap: 6,
         paddingRight: 2, boxShadow: "none",
       }}>
+        <div style={roomy ? { columnWidth: 200, columnGap: 18 } : { display: "flex", flexDirection: "column", gap: 6 }}>
         {active.verses.map((v, vi) => (
-          <div key={`${v.label}-${vi}`}>
+          <div key={`${v.label}-${vi}`} style={roomy ? { breakInside: "avoid", marginBottom: 10 } : undefined}>
             <div style={{
               fontFamily: "monospace", fontSize: 9, letterSpacing: "0.1em",
               color: "rgba(175,169,236,0.65)", marginBottom: 3,
@@ -915,6 +917,7 @@ const DashboardChordBank: FC = () => {
             </div>
           </div>
         ))}
+        </div>
       </div>
       )}
     </div>

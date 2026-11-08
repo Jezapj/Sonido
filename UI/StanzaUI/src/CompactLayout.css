@@ -84,6 +84,15 @@
   max-height: 168px;
 }
 
+/* Focused: the songs panel and carousel are sized to fill the card */
+[data-compact="true"] .magic-bento-card.magic-bento-card--focused:nth-child(1) .da-carousel {
+  max-height: none;
+}
+
+[data-compact="true"] .magic-bento-card.magic-bento-card--focused:nth-child(1) .da-chords {
+  height: 100% !important;
+}
+
 [data-compact="true"] .da-fft-opt {
   margin-top: 3px !important;
 }

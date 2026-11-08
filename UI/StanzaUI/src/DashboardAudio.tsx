@@ -32,6 +32,12 @@ const PACE_OPTIONS: { id: FftPace; label: string }[] = [
 const PANEL_COUNT = 4;
 const PANEL_W = 300;
 const SWIPE_THRESHOLD = 48;
+/** Empty space between panels, so a neighbour can never show at the carousel's edge. */
+const PANEL_GAP = 24;
+/** On-screen size of the songs panel when focused; the rest of the zoom becomes extra room. */
+const SONGS_ZOOM = 1.7;
+
+const wrapPage = (p: number) => ((p % PANEL_COUNT) + PANEL_COUNT) % PANEL_COUNT;
 
 const PANEL_LABELS = ["FFT", "SONGS", "METRO", "TUNER"];
 
@@ -151,32 +157,50 @@ export default function DashboardAudio({ focused = false }: { focused?: boolean 
   useEffect(() => { startPitchTracker(); }, []);
 
   // ── Carousel ───────────────────────────────────────────────────────────────
-  const [page, setPage] = useState(0);
+  // `pos` counts steps and never wraps, so tuner → FFT is one more step along the track
+  const [pos, setPos] = useState(0);
+  const [fromPos, setFromPos] = useState(0);
   const [dragX, setDragX] = useState(0);
   const [dragging, setDragging] = useState(false);
   const dragStartX = useRef(0);
-  const dragStartPage = useRef(0);
-  const pageRef = useRef(0);
+  const posRef = useRef(0);
+  const page = wrapPage(pos);
 
-  useEffect(() => { pageRef.current = page; }, [page]);
+  const moveTo = (next: number) => {
+    setFromPos(posRef.current);
+    setPos(next);
+    posRef.current = next;
+  };
 
   // ── Focus zoom: scale the fixed-width panel up to fill the focused card ────
   const rootRef = useRef<HTMLDivElement>(null);
+  const headerRef = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(1);
+  const [view, setView] = useState<{ w: number; h: number } | null>(null);   // carousel size when focused
   const zoomRef = useRef(1);
   useEffect(() => { zoomRef.current = zoom; }, [zoom]);
 
   useEffect(() => {
-    if (!focused) { setZoom(1); return; }
+    if (!focused) { setZoom(1); setView(null); return; }
     const root = rootRef.current;
+    const header = headerRef.current;
     const parent = root?.parentElement;
-    if (!root || !parent) return;
+    if (!root || !header || !parent) return;
     const fit = () => {
-      // offset* sizes ignore transforms, so this is the unscaled panel size
-      const natW = root.offsetWidth, natH = root.offsetHeight;
-      if (!natW || !natH) return;
-      const next = Math.max(1, Math.min((parent.clientWidth - 24) / natW, (parent.clientHeight - 8) / natH));
-      if (Math.abs(next - zoomRef.current) > 0.01) setZoom(next);
+      // offset* sizes ignore transforms. Only the fixed-size panels set the zoom: the
+      // songs panel grows to fill whatever room they leave.
+      let content = 0;
+      root.querySelectorAll<HTMLElement>("[data-fixed-panel]").forEach(el => {
+        content = Math.max(content, el.offsetHeight);
+      });
+      const headerH = header.offsetHeight + 4;
+      if (!content) return;
+      const roomW = parent.clientWidth - 24, roomH = parent.clientHeight - 8;
+      const next = Math.max(1, Math.min(roomW / PANEL_W, roomH / (headerH + content)));
+      if (Math.abs(next - zoomRef.current) > 0.01) { zoomRef.current = next; setZoom(next); }
+      const w = Math.max(PANEL_W, roomW / zoomRef.current);
+      const h = Math.max(content, roomH / zoomRef.current - headerH);
+      setView(v => (v && Math.abs(v.w - w) < 0.5 && Math.abs(v.h - h) < 0.5 ? v : { w, h }));
     };
     fit();
     const ro = new ResizeObserver(fit);
@@ -277,8 +301,6 @@ export default function DashboardAudio({ focused = false }: { focused?: boolean 
   }, [connected]);
 
   // ── Carousel swipe (loops) ─────────────────────────────────────────────────
-  const wrapPage = (p: number) => ((p % PANEL_COUNT) + PANEL_COUNT) % PANEL_COUNT;
-
   const onPointerDown = (e: React.PointerEvent) => {
     // Don't steal drags from sliders / buttons / the songs list (folder DnD)
     const el = e.target as HTMLElement;
@@ -287,7 +309,7 @@ export default function DashboardAudio({ focused = false }: { focused?: boolean 
     if (el.closest(".da-chords")) return;
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     dragStartX.current = e.clientX;
-    dragStartPage.current = pageRef.current;
+    setFromPos(posRef.current);
     setDragging(true);
     setDragX(0);
   };
@@ -300,10 +322,8 @@ export default function DashboardAudio({ focused = false }: { focused?: boolean 
   const finishDrag = (clientX: number) => {
     if (!dragging) return;
     const dx = clientX - dragStartX.current;
-    let next = dragStartPage.current;
-    if (dx <= -SWIPE_THRESHOLD) next = dragStartPage.current + 1;
-    else if (dx >= SWIPE_THRESHOLD) next = dragStartPage.current - 1;
-    setPage(wrapPage(next));
+    if (dx <= -SWIPE_THRESHOLD) moveTo(posRef.current + 1);
+    else if (dx >= SWIPE_THRESHOLD) moveTo(posRef.current - 1);
     setDragX(0);
     setDragging(false);
   };
@@ -312,11 +332,32 @@ export default function DashboardAudio({ focused = false }: { focused?: boolean 
     finishDrag(e.clientX);
   };
 
-  const goPage = (dir: -1 | 1) => {
-    setPage(p => wrapPage(p + dir));
+  const goPage = (dir: -1 | 1) => moveTo(posRef.current + dir);
+
+  /** Dots take the short way round too. */
+  const goToPanel = (i: number) => {
+    const d = wrapPage(i - page);
+    moveTo(posRef.current + (d > PANEL_COUNT / 2 ? d - PANEL_COUNT : d));
   };
 
-  const trackOffset = -page * PANEL_W + (dragging ? dragX : 0);
+  const viewW = view?.w ?? PANEL_W;
+  const step = viewW + PANEL_GAP;
+  const trackOffset = -pos * step + (dragging ? dragX : 0);
+
+  // Each panel sits on whichever lap of the track is closest to where we are (and
+  // were), so the panel either side of the current one is always its real neighbour.
+  // Panels hold live state, so they move rather than being duplicated.
+  const lapCentre = (pos + fromPos) / 2;
+  const panelStyle = (i: number): React.CSSProperties => ({
+    width: viewW,
+    flexShrink: 0,
+    display: "flex",
+    justifyContent: "center",
+    alignItems: focused ? "center" : "flex-start",
+    transform: `translateX(${Math.round((lapCentre - i) / PANEL_COUNT) * PANEL_COUNT * step}px)`,
+  });
+
+  const songsScale = view ? Math.max(1, zoom / SONGS_ZOOM) : 1;
 
   return (
     <div
@@ -326,9 +367,9 @@ export default function DashboardAudio({ focused = false }: { focused?: boolean 
         ? { position: "relative", margin: "auto", transform: `scale(${zoom})`, flexShrink: 0, color: rootColor }
         : { position: "absolute", bottom: 0, left: 10, color: rootColor }}
     >
-      <div style={{
+      <div ref={headerRef} style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
-        width: PANEL_W, marginBottom: 4,
+        width: PANEL_W, margin: "0 auto 4px",
       }}>
         <button type="button" onClick={() => goPage(-1)} style={{ ...btnBase }}>‹</button>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -343,7 +384,7 @@ export default function DashboardAudio({ focused = false }: { focused?: boolean 
               <button
                 key={i}
                 type="button"
-                onClick={() => setPage(i)}
+                onClick={() => goToPanel(i)}
                 aria-label={`Go to ${PANEL_LABELS[i]}`}
                 style={{
                   width: 6, height: 6, borderRadius: "50%", padding: 0, border: "none",
@@ -365,7 +406,8 @@ export default function DashboardAudio({ focused = false }: { focused?: boolean 
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
         style={{
-          width: PANEL_W,
+          width: viewW,
+          height: view?.h,
           overflow: "hidden",
           touchAction: "pan-y",
           cursor: dragging ? "grabbing" : "grab",
@@ -374,12 +416,15 @@ export default function DashboardAudio({ focused = false }: { focused?: boolean 
         <div
           style={{
             display: "flex",
-            width: PANEL_W * PANEL_COUNT,
+            gap: PANEL_GAP,
+            width: step * PANEL_COUNT,
+            height: view?.h,
             transform: `translateX(${trackOffset}px)`,
             transition: dragging ? "none" : "transform 0.28s cubic-bezier(0.22, 1, 0.36, 1)",
           }}
         >
-          <div style={{ width: PANEL_W, flexShrink: 0 }}>
+          <div style={panelStyle(0)}>
+            <div data-fixed-panel style={{ width: PANEL_W }}>
             <canvas ref={canvasRef} width={Math.round(300 * fftScale)} height={Math.round(120 * fftScale)} className="da-fft-canvas" style={{ width: 300, height: 120 }} />
             <div className="da-accent" style={{ marginTop: 6, fontSize: 30, fontWeight: "bold", color: accent, lineHeight: 1 }}>
               {note}
@@ -402,18 +447,28 @@ export default function DashboardAudio({ focused = false }: { focused?: boolean 
               accent={accent}
               light={light}
             />
+            </div>
           </div>
 
-          <div style={{ width: PANEL_W, flexShrink: 0 }}>
-            <DashboardChordBank />
+          <div style={panelStyle(1)}>
+            <div style={view ? { width: view.w, height: view.h, overflow: "hidden" } : undefined}>
+              <div style={view ? {
+                width: view.w * songsScale,
+                height: view.h * songsScale,
+                transform: `scale(${1 / songsScale})`,
+                transformOrigin: "0 0",
+              } : undefined}>
+                <DashboardChordBank size={view ? { w: view.w * songsScale, h: view.h * songsScale } : undefined} />
+              </div>
+            </div>
           </div>
 
-          <div style={{ width: PANEL_W, flexShrink: 0 }}>
-            <DashboardMetronome />
+          <div style={panelStyle(2)}>
+            <div data-fixed-panel style={{ width: PANEL_W }}><DashboardMetronome /></div>
           </div>
 
-          <div style={{ width: PANEL_W, flexShrink: 0 }}>
-            <DashboardTuner />
+          <div style={panelStyle(3)}>
+            <div data-fixed-panel style={{ width: PANEL_W }}><DashboardTuner /></div>
           </div>
         </div>
       </div>
