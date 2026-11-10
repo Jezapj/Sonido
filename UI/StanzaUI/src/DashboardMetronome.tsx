@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, FC } from "react";
 import { metronomeBeat, metronomeStopped, onMetronomeCue, onMetronomeStart, setTempo } from "./takes";
+import { getProfile, updatePractice } from "./profileStore";
 
 export type TimeSig = { beats: number; noteValue: number; label: string };
 
@@ -56,10 +57,13 @@ const btnBase: React.CSSProperties = {
 };
 
 const DashboardMetronome: FC = () => {
-  const [bpm, setBpm] = useState(120);
-  const [sigIdx, setSigIdx] = useState(2);
-  const [accents, setAccents] = useState<boolean[]>(() => defaultAccents(TIME_SIGNATURES[2]));
-  const [volume, setVolume] = useState(0.7);
+  const [bpm, setBpm] = useState(() => getProfile().practice.bpm);
+  const [sigIdx, setSigIdx] = useState(() => {
+    const saved = getProfile().practice.sigIdx;
+    return TIME_SIGNATURES[saved] ? saved : 2;
+  });
+  const [accents, setAccents] = useState<boolean[]>(() => defaultAccents(TIME_SIGNATURES[sigIdx]));
+  const [volume, setVolume] = useState(() => getProfile().practice.volume);
   const [running, setRunning] = useState(false);
   const [activeBeat, setActiveBeat] = useState(-1);
 
@@ -205,6 +209,7 @@ const DashboardMetronome: FC = () => {
     const next = (sigIdx + dir + TIME_SIGNATURES.length) % TIME_SIGNATURES.length;
     const nextSig = TIME_SIGNATURES[next];
     setSigIdx(next);
+    updatePractice({ sigIdx: next });
     setAccents(defaultAccents(nextSig));
     beatRef.current = 0;
   };
@@ -248,7 +253,7 @@ const DashboardMetronome: FC = () => {
             <input
               className="da-bpm-slider"
               type="range" min={40} max={240} step={1} value={bpm}
-              onChange={e => setBpm(Number(e.target.value))}
+              onChange={e => { setBpm(Number(e.target.value)); updatePractice({ bpm: Number(e.target.value) }); }}
               style={{ flex: 1, accentColor: "#AFA9EC", cursor: "pointer", boxShadow: "none" }}
             />
           </div>
@@ -335,7 +340,7 @@ const DashboardMetronome: FC = () => {
         }}>VOL</span>
         <input
           type="range" min={0} max={1} step={0.01} value={volume}
-          onChange={e => setVolume(Number(e.target.value))}
+          onChange={e => { setVolume(Number(e.target.value)); updatePractice({ volume: Number(e.target.value) }); }}
           style={{ flex: 1, accentColor: "#AFA9EC", cursor: "pointer" }}
         />
         <span style={{

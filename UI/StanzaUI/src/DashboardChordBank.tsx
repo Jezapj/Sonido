@@ -5,6 +5,7 @@ import {
   type Take,
 } from "./takes";
 import { TIME_SIGNATURES } from "./DashboardMetronome";
+import { getProfile, updateProfile } from "./profileStore";
 
 export type ChordVerse = {
   label: string;
@@ -24,13 +25,6 @@ export type SongFolder = {
   id: string;
   name: string;
 };
-
-type BankStore = {
-  songs: Song[];
-  folders: SongFolder[];
-};
-
-const LS_KEY = "stanza-chord-bank";
 
 const TrashIcon = () => (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
@@ -76,34 +70,6 @@ const fieldStyle: React.CSSProperties = {
   padding: "5px 8px",
   outline: "none",
 };
-
-function normalizeSong(s: Song): Song {
-  return { ...s, folderId: s.folderId ?? null, takes: Array.isArray(s.takes) ? s.takes : [] };
-}
-
-function loadBank(): BankStore {
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    if (!raw) return { songs: [], folders: [] };
-    const data = JSON.parse(raw);
-    if (Array.isArray(data)) {
-      return { songs: data.map(normalizeSong), folders: [] };
-    }
-    return {
-      songs: Array.isArray(data.songs) ? data.songs.map(normalizeSong) : [],
-      folders: Array.isArray(data.folders) ? data.folders : [],
-    };
-  } catch { /* ignore */ }
-  return { songs: [], folders: [] };
-}
-
-function saveBank(store: BankStore) {
-  try {
-    localStorage.setItem(LS_KEY, JSON.stringify(store));
-  } catch (e) {
-    console.warn("[ChordBank] could not save songs (storage full?):", e);
-  }
-}
 
 /**
  * Parse chord text into verses.
@@ -238,8 +204,8 @@ function TakeSyncEditor({ take, onChange }: { take: Take; onChange: (next: Take)
 const DashboardChordBank: FC<{ size?: { w: number; h: number } }> = ({ size }) => {
   const panelW = size?.w ?? 300, panelH = size?.h ?? 168;
   const roomy = panelW > 420;   // focused: verses flow into columns
-  const [songs, setSongs] = useState<Song[]>(() => loadBank().songs);
-  const [folders, setFolders] = useState<SongFolder[]>(() => loadBank().folders);
+  const [songs, setSongs] = useState<Song[]>(() => getProfile().songs);
+  const [folders, setFolders] = useState<SongFolder[]>(() => getProfile().folders);
   const [mode, setMode] = useState<Mode>("list");
   const [activeId, setActiveId] = useState<string | null>(null);
   const [title, setTitle] = useState("");
@@ -251,7 +217,7 @@ const DashboardChordBank: FC<{ size?: { w: number; h: number } }> = ({ size }) =
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const dragRef = useRef<{ id: string; x: number; y: number; moved: boolean } | null>(null);
 
-  useEffect(() => { saveBank({ songs, folders }); }, [songs, folders]);
+  useEffect(() => { updateProfile({ songs, folders }); }, [songs, folders]);
 
   const active = songs.find(s => s.id === activeId) ?? null;
 

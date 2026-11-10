@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import "./App.css";
 import "./CompactLayout.css";
@@ -12,29 +12,10 @@ import MagicBento from './MagicBento';
 import ModelViewer from './ModelViewer';
 import CircularText from './CircularText';
 import Profile from './Profile';
-import Settings, { AppSettings, DEFAULT_SETTINGS } from './Settings';
+import Settings, { AppSettings } from './Settings';
 import TextType from './TextType';
 import type { PedalState } from './PedalOverlay';
-
-type Theme = 'dark' | 'light';
-
-// ── localStorage helpers ──────────────────────────────────────────────────────
-
-const LS_SETTINGS  = 'stanza-settings';
-const LS_SESSIONS  = 'stanza-sessions';
-const LS_PRESETS   = 'stanza-presets-saved';
-
-function loadSettings(): AppSettings {
-  try {
-    const raw = localStorage.getItem(LS_SETTINGS);
-    if (raw) return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
-  } catch { /* ignore */ }
-  return { ...DEFAULT_SETTINGS };
-}
-
-function loadInt(key: string, fallback = 0): number {
-  return parseInt(localStorage.getItem(key) ?? String(fallback), 10) || fallback;
-}
+import { enterProfile, initProfile, updateProfile, useProfileValue, type Theme } from './profileStore';
 
 // ── Compact layout hook — activates at 800×480 and similar small screens ──────
 // Detects via window dimensions and syncs a data-compact attribute to the root
@@ -61,27 +42,25 @@ function useCompactLayout(): boolean {
 // ── App ───────────────────────────────────────────────────────────────────────
 
 function App() {
-  const greetMsgRef = useRef("");
-  const nameRef     = useRef("");
-
   const [view,      setView]      = useState("landing");
   const [bgVariant, setBgVariant] = useState(0);
-  const [username,  setUsername]  = useState("");
-  const [theme,     setTheme]     = useState<Theme>('dark');
+
+  // ── Profile — the name, theme and settings all live in the loaded profile ───
+  const username = useProfileValue(p => p.name);
+  const theme    = useProfileValue(p => p.theme);
+  const settings = useProfileValue(p => p.settings);
+  const [nameDraft,  setNameDraft]  = useState("");
+  const [entryError, setEntryError] = useState("");
+
+  useEffect(() => { void initProfile(); }, []);
+  useEffect(() => { setNameDraft(username); }, [username]);
 
   // ── Compact layout detection ──────────────────────────────────────────────
   const isCompact = useCompactLayout();
 
-  // ── Settings — lifted so every component that needs them can read them ──────
-  const [settings, setSettings] = useState<AppSettings>(loadSettings);
-
   const handleSettingsChange = useCallback(
     <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
-      setSettings(prev => {
-        const next = { ...prev, [key]: value };
-        localStorage.setItem(LS_SETTINGS, JSON.stringify(next));
-        return next;
-      });
+      updateProfile(p => ({ settings: { ...p.settings, [key]: value } }));
     },
     [],
   );
@@ -89,16 +68,8 @@ function App() {
   // ── Pedal state — lifted so Profile can read it ───────────────────────────
   const [pedalStates, setPedalStates] = useState<Record<string, PedalState>>({});
 
-  // ── Persistent counters ───────────────────────────────────────────────────
-  const [sessionCount,    setSessionCount]    = useState(() => loadInt(LS_SESSIONS));
-  const [presetSavedCount, setPresetSavedCount] = useState(() => loadInt(LS_PRESETS));
-
   const handlePresetSaved = useCallback(() => {
-    setPresetSavedCount(prev => {
-      const next = prev + 1;
-      localStorage.setItem(LS_PRESETS, String(next));
-      return next;
-    });
+    updateProfile(p => ({ presetsSaved: p.presetsSaved + 1 }));
   }, []);
 
   // Apply theme attribute so CSS [data-theme] selectors fire globally
@@ -107,7 +78,7 @@ function App() {
   }, [theme]);
 
   const handleThemeChange = useCallback((t: Theme) => {
-    setTheme(t);
+    updateProfile({ theme: t });
   }, []);
 
   const items = [
@@ -122,13 +93,13 @@ function App() {
   }
 
   async function enter() {
-    greetMsgRef.current = await invoke("greet", { name: nameRef.current });
-    setUsername(nameRef.current.toUpperCase());
-    setSessionCount(prev => {
-      const next = prev + 1;
-      localStorage.setItem(LS_SESSIONS, String(next));
-      return next;
-    });
+    setEntryError("");
+    try {
+      await enterProfile(nameDraft);
+    } catch (e) {
+      setEntryError(`Couldn't open that profile: ${e instanceof Error ? e.message : String(e)}`);
+      return;
+    }
     setTimeout(() => { setView("main"); switchBg(); }, 800);
   }
 
@@ -238,12 +209,13 @@ function App() {
             <form className="row" onSubmit={e => { e.preventDefault(); enter(); }}>
               <input
                 id="greet-input"
-                onChange={e => (nameRef.current = e.currentTarget.value)}
+                value={nameDraft}
+                onChange={e => setNameDraft(e.currentTarget.value)}
                 placeholder="Enter your Username..."
               />
               <button type="submit">Enter</button>
             </form>
-            <p>{}</p>
+            <p>{entryError}</p>
           </main>
         </>
       )}
@@ -303,7 +275,7 @@ function App() {
               {/* Ring text — hidden on compact screens */}
               {!isCompact && (
                 <CircularText
-                  text={greetMsgRef.current}
+                  text={`${username}*STANZA*`}
                   onHover="speedUp"
                   spinDuration={20}
                   className={theme === "dark" ? "custom-class" : "custom-class-light"}
@@ -332,16 +304,7 @@ function App() {
       {/* ── PROFILE ── */}
       {view === "profile" && (
         <main>
-          <Profile
-            username={username}
-            onUsernameChange={name => {
-              setUsername(name);
-              greetMsgRef.current = `${name}*STANZA*`;
-            }}
-            pedalStates={pedalStates}
-            presetCount={presetSavedCount}
-            sessionCount={sessionCount}
-          />
+          <Profile pedalStates={pedalStates} />
         </main>
       )}
 

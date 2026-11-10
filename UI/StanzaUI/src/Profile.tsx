@@ -1,13 +1,13 @@
 import React, { useState, useRef } from 'react';
 import type { PedalState } from './PedalOverlay';
+import {
+  newProfile, openProfile, saveProfileAs, updateProfile, useProfileState,
+  type SaveStatus,
+} from './profileStore';
 import './Profile.css';
 
 interface ProfileProps {
-  username:         string;
-  onUsernameChange: (name: string) => void;
-  pedalStates:      Record<string, PedalState>;
-  presetCount:      number;
-  sessionCount:     number;
+  pedalStates: Record<string, PedalState>;
 }
 
 const AVATAR_COLORS = [
@@ -18,23 +18,32 @@ const AVATAR_COLORS = [
   'linear-gradient(135deg, #ff0066, #4d0022)',
 ];
 
-const Profile: React.FC<ProfileProps> = ({
-  username, onUsernameChange, pedalStates, presetCount, sessionCount,
-}) => {
-  const [editing,     setEditing]     = useState(false);
-  const [draft,       setDraft]       = useState(username);
-  const [avatarColor, setAvatarColor] = useState(0);
-  const [saved,       setSaved]       = useState(false);
+const SAVE_LABEL: Record<SaveStatus, string> = {
+  idle:   'Up to date',
+  saving: 'Saving…',
+  saved:  'All changes saved',
+  error:  'Not saved',
+};
+
+const Profile: React.FC<ProfileProps> = ({ pedalStates }) => {
+  const { path, data: profile, saveStatus, error } = useProfileState();
+  const username = profile.name;
+
+  const [editing,   setEditing]   = useState(false);
+  const [draft,     setDraft]     = useState(username);
+  const [saved,     setSaved]     = useState(false);
+  const [fileError, setFileError] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const initial      = username?.[0]?.toUpperCase() || '?';
-  const activeCount  = Object.values(pedalStates).filter(s => s.enabled).length;
-  const totalCount   = Object.keys(pedalStates).length;
-  const pedalDisplay = totalCount > 0 ? `${activeCount}/${totalCount}` : '—';
+  const initial     = username?.[0]?.toUpperCase() || '?';
+  const avatarColor = AVATAR_COLORS[profile.avatar] ? profile.avatar : 0;
+  const takeCount   = profile.songs.reduce((sum, song) => sum + song.takes.length, 0);
+  const songNames   = profile.songs.map(song => song.title);
+  const presetNames = profile.presets.map(preset => preset.name);
 
   const handleSave = () => {
     if (draft.trim()) {
-      onUsernameChange(draft.trim().toUpperCase());
+      updateProfile({ name: draft.trim().toUpperCase() });
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     }
@@ -46,9 +55,28 @@ const Profile: React.FC<ProfileProps> = ({
     if (e.key === 'Escape') { setDraft(username); setEditing(false); }
   };
 
-  const joinDate = new Date().toLocaleDateString('en-AU', {
+  const runFileAction = async (action: () => Promise<string | null | void>) => {
+    setFileError('');
+    setEditing(false);
+    try {
+      setFileError((await action()) ?? '');
+    } catch (e) {
+      setFileError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const joinDate = new Date(profile.createdAt).toLocaleDateString('en-AU', {
     month: 'long', year: 'numeric',
   });
+
+  const renderNames = (title: string, names: string[], empty: string) => (
+    <div className="profile-contents__column">
+      <h3 className="profile-section-title">{title}</h3>
+      {names.length === 0
+        ? <p className="profile-contents__empty">{empty}</p>
+        : <ul className="profile-contents__list">{names.map((n, i) => <li key={i} title={n}>{n}</li>)}</ul>}
+    </div>
+  );
 
   return (
     <div className="profile-page">
@@ -59,7 +87,7 @@ const Profile: React.FC<ProfileProps> = ({
           <div
             className="profile-avatar"
             style={{ background: AVATAR_COLORS[avatarColor] }}
-            onClick={() => setAvatarColor(c => (c + 1) % AVATAR_COLORS.length)}
+            onClick={() => updateProfile({ avatar: (avatarColor + 1) % AVATAR_COLORS.length })}
             title="Click to change colour"
           >
             <span className="profile-avatar__initial">{initial}</span>
@@ -71,7 +99,7 @@ const Profile: React.FC<ProfileProps> = ({
                 key={i}
                 className={`profile-swatch${i === avatarColor ? ' profile-swatch--active' : ''}`}
                 style={{ background: bg }}
-                onClick={() => setAvatarColor(i)}
+                onClick={() => updateProfile({ avatar: i })}
                 aria-label={`Colour ${i + 1}`}
               />
             ))}
@@ -114,32 +142,45 @@ const Profile: React.FC<ProfileProps> = ({
 
         <div className="profile-divider" />
 
+        {/* ── Profile file ── */}
+        <div className="profile-file">
+          <div className="profile-file__header">
+            <h3 className="profile-section-title">Profile File</h3>
+            <span className={`profile-file__status profile-file__status--${saveStatus}`}>{SAVE_LABEL[saveStatus]}</span>
+          </div>
+          <p className="profile-file__path" title={path ?? undefined}>{path ?? 'No profile loaded'}</p>
+          <div className="profile-file__actions">
+            <button className="profile-btn profile-btn--cancel" onClick={() => runFileAction(newProfile)}>New</button>
+            <button className="profile-btn profile-btn--cancel" onClick={() => runFileAction(openProfile)}>Open</button>
+            <button className="profile-btn profile-btn--cancel" onClick={() => runFileAction(saveProfileAs)}>Save As</button>
+          </div>
+          {(fileError || error) && <p className="profile-file__error">{fileError || error}</p>}
+        </div>
+
+        <div className="profile-divider" />
+
         {/* ── Stats ── */}
         <div className="profile-stats">
           {[
-            {
-              label: 'Pedals Active',
-              value: pedalDisplay,
-              title: totalCount > 0
-                ? `${activeCount} of ${totalCount} pedals currently enabled`
-                : 'No pedals configured yet — open the Effects card',
-            },
-            {
-              label: 'Presets Saved',
-              value: presetCount > 0 ? String(presetCount) : '—',
-              title: `${presetCount} preset file${presetCount !== 1 ? 's' : ''} saved this session`,
-            },
-            {
-              label: 'Sessions',
-              value: String(sessionCount),
-              title: `You have entered Stanza ${sessionCount} time${sessionCount !== 1 ? 's' : ''}`,
-            },
+            { label: 'Songs',    value: profile.songs.length,   title: 'Songs in this profile' },
+            { label: 'Takes',    value: takeCount,              title: 'Takes saved across all songs' },
+            { label: 'Presets',  value: profile.presets.length, title: 'Pedal presets in the bank' },
+            { label: 'Exports',  value: profile.presetsSaved,   title: 'Preset files saved from this profile' },
+            { label: 'Sessions', value: profile.sessions,       title: 'Times this profile has entered Stanza' },
           ].map(({ label, value, title }) => (
             <div className="profile-stat" key={label} title={title}>
               <span className="profile-stat__value">{value}</span>
               <span className="profile-stat__label">{label}</span>
             </div>
           ))}
+        </div>
+
+        <div className="profile-divider" />
+
+        {/* ── What's in the profile ── */}
+        <div className="profile-contents">
+          {renderNames('Songs', songNames, 'No songs yet')}
+          {renderNames('Pedal Presets', presetNames, 'No presets yet')}
         </div>
 
         <div className="profile-divider" />

@@ -201,6 +201,50 @@ fn write_binary_file(path: String, data: Vec<u8>) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn read_text_file(path: String) -> Result<String, String> {
+    std::fs::read_to_string(&path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn file_exists(path: String) -> bool {
+    std::path::Path::new(&path).exists()
+}
+
+/// Writes beside the target and renames over it, so a crash can't leave half a file.
+#[tauri::command]
+fn write_text_file_atomic(path: String, contents: String) -> Result<(), String> {
+    let target = std::path::Path::new(&path);
+    if let Some(dir) = target.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    let temp = format!("{path}.tmp");
+    std::fs::write(&temp, contents).map_err(|e| e.to_string())?;
+    std::fs::rename(&temp, target).map_err(|e| e.to_string())
+}
+
+/// Where a profile goes when only its name is known: Documents/Stanza/<name>.stanzaprofile
+#[tauri::command]
+fn default_profile_path(app: tauri::AppHandle, name: String) -> Result<String, String> {
+    let mut stem: String = name
+        .trim()
+        .chars()
+        .map(|c| if c.is_alphanumeric() || " -_".contains(c) { c } else { '_' })
+        .collect();
+    const RESERVED: [&str; 4] = ["CON", "PRN", "AUX", "NUL"];
+    let upper = stem.to_uppercase();
+    let device = upper.len() == 4 && (upper.starts_with("COM") || upper.starts_with("LPT"));
+    if stem.is_empty() || device || RESERVED.contains(&upper.as_str()) {
+        stem = format!("Profile {stem}").trim().to_string();
+    }
+    let base = app
+        .path()
+        .document_dir()
+        .or_else(|_| app.path().app_data_dir())
+        .map_err(|e| e.to_string())?;
+    Ok(base.join("Stanza").join(format!("{stem}.stanzaprofile")).to_string_lossy().into_owned())
+}
+
+#[tauri::command]
 fn greet(name: &str) -> String {
     format!("{}*STANZA*", name.to_uppercase())
 }
@@ -620,6 +664,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             greet,
             write_binary_file,
+            read_text_file,
+            write_text_file_atomic,
+            file_exists,
+            default_profile_path,
             list_serial_ports,
             stream_audio,
             stream_audio_serial,

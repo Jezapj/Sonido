@@ -488,7 +488,7 @@ const MagicBento: React.FC<BentoProps> = ({
     },
     {
       color: 'rgba(0,0,0,0.92)', title: 'Load/Save Setups',
-      description: 'Streamline workflows', label: 'Presets',
+      description: 'Streamline workflows', label: 'Profile',
       glowRgb: '255, 0, 255', contentInteractive: true,
       content: (
         <PresetsCard

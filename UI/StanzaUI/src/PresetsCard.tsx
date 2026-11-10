@@ -1,6 +1,7 @@
 import React, { useRef, useState, useCallback, useEffect } from 'react';
 import type { PedalState } from './PedalOverlay';
 import { useIsLightMode } from './UseTheme';
+import { getProfile, updateProfile } from './profileStore';
 
 export interface PresetsCardProps {
   pedalStates:    Record<string, PedalState>;
@@ -8,7 +9,7 @@ export interface PresetsCardProps {
   onPresetSaved?: () => void;
 }
 
-interface PresetEntry {
+export interface PresetEntry {
   id:     string;
   name:   string;
   pedals: Record<string, PedalState>;
@@ -21,19 +22,7 @@ interface PresetFile {
   pedals:  Record<string, PedalState>;
 }
 
-const BANK_KEY      = 'stanza-preset-bank';
 const MAX_BANK_SIZE = 12;
-
-function readBank(): PresetEntry[] {
-  try {
-    const raw = localStorage.getItem(BANK_KEY);
-    return raw ? (JSON.parse(raw) as PresetEntry[]) : [];
-  } catch { return []; }
-}
-
-function writeBank(entries: PresetEntry[]): void {
-  try { localStorage.setItem(BANK_KEY, JSON.stringify(entries)); } catch {}
-}
 
 function autoName(): string {
   const d = new Date();
@@ -55,7 +44,7 @@ const PresetsCard: React.FC<PresetsCardProps> = ({ pedalStates, onLoad, onPreset
   const fileInputRef = useRef<HTMLInputElement>(null);
   const light        = useIsLightMode();
 
-  const [bank,         setBank]         = useState<PresetEntry[]>(readBank);
+  const [bank,         setBank]         = useState<PresetEntry[]>(() => getProfile().presets);
   const [activeId,     setActiveId]     = useState<string | null>(null);
   const [editingId,    setEditingId]    = useState<string | null>(null);
   const [editDraft,    setEditDraft]    = useState('');
@@ -77,7 +66,7 @@ const PresetsCard: React.FC<PresetsCardProps> = ({ pedalStates, onLoad, onPreset
 
   const commitBank = useCallback((next: PresetEntry[], newActive?: string | null) => {
     setBank(next);
-    writeBank(next);
+    updateProfile({ presets: next });
     if (newActive !== undefined) setActiveId(newActive);
   }, []);
 

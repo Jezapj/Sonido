@@ -8,13 +8,12 @@ import { PianoHandControls, PianoView } from "./PianoView";
 import { HAND_TONES, type HandLook } from "./handRig";
 import TakeBar, { RecButton, SyncButton } from "./TakeBar";
 import { useTakes } from "./takes";
+import { getProfile, updatePractice } from "./profileStore";
 
 const GUITAR_BUF = 1024;
 const FS = 47991;
 
 const VIEW_LABELS = ["WAVE", "BARS", "SCORE", "PIANO"];
-const LS_HANDS_ON = "stanza-piano-hands-on";
-const LS_HAND_LOOK = "stanza-piano-hand-look";
 const VIEW_COUNT = VIEW_LABELS.length;
 const SWIPE_THRESHOLD = 48;
 
@@ -123,21 +122,12 @@ export default function RustStreamExample() {
   const light = useIsLightMode();
   const [view, setView] = useState(0);
   const [scoreMode, setScoreMode] = useState<NotationMode>("staff");
-  const [handsOn, setHandsOn] = useState(() => {
-    try { return localStorage.getItem(LS_HANDS_ON) === "1"; } catch { return false; }
-  });
+  const [handsOn, setHandsOn] = useState(() => getProfile().practice.handsOn);
   const [handLook, setHandLook] = useState<HandLook>(() => {
-    try {
-      const saved = localStorage.getItem(LS_HAND_LOOK);
-      return saved && saved in HAND_TONES ? (saved as HandLook) : "outline";
-    } catch { return "outline"; }
+    const saved = getProfile().practice.handLook;
+    return saved in HAND_TONES ? (saved as HandLook) : "outline";
   });
-  useEffect(() => {
-    try {
-      localStorage.setItem(LS_HANDS_ON, handsOn ? "1" : "0");
-      localStorage.setItem(LS_HAND_LOOK, handLook);
-    } catch {}
-  }, [handsOn, handLook]);
+  useEffect(() => { updatePractice({ handsOn, handLook }); }, [handsOn, handLook]);
   const [dragX, setDragX] = useState(0);
   const [dragging, setDragging] = useState(false);
   const dragStartX = useRef(0);
