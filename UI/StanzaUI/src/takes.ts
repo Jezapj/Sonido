@@ -12,6 +12,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import { assignFingering, newFingeringState, STANDARD_TUNING, FRET_COUNT } from "./music";
 import { decodeMidi, encodeMidi } from "./midi";
+import { playNotes, stopNotes } from "./guideSynth";
 import { ONSET_LAG_MS, startRecording, stopRecording, type NoteEvent } from "./pitchTracker";
 import { barMs, countAt, normalizeDownbeat, type Meter } from "./rhythm";
 
@@ -289,6 +290,23 @@ let guideStartAt = 0;            // performance.now() at which take time 0 hits 
 let guidePausedAt = -GUIDE_LEAD_MS;
 let judged = new Int8Array(0);   // -1 pending, 0 missed, 1 hit
 let judgeFrom = 0;
+let guideSound = false;          // sound the guide's notes on a piano while it plays
+
+/** Schedule the guide's notes from now on, heard with the metronome (ONSET_LAG_MS before the line). */
+function soundGuide() {
+  const g = snap.guide;
+  if (!g || !snap.guidePlaying || !guideSound) return;
+  playNotes(g.notes.map(n => ({
+    at: guideStartAt + n.startMs - ONSET_LAG_MS, durMs: n.durMs, midi: n.midi, velocity: n.velocity,
+  })));
+}
+
+/** Turn the playback piano on or off, including mid-take. */
+export function setGuideSound(on: boolean) {
+  if (guideSound === on) return;
+  guideSound = on;
+  if (on) soundGuide(); else stopNotes();
+}
 
 function resetJudging() {
   judged = new Int8Array(snap.guide?.notes.length ?? 0).fill(-1);
@@ -303,6 +321,7 @@ function restPosition(take: Take | null): number {
 
 export function loadGuide(take: Take) {
   cueMetronome(null);
+  stopNotes();
   guidePausedAt = restPosition(take);
   update({ guide: take, guidePlaying: false });
   resetJudging();
@@ -310,6 +329,7 @@ export function loadGuide(take: Take) {
 
 export function unloadGuide() {
   cueMetronome(null);
+  stopNotes();
   update({ guide: null, guidePlaying: false });
   resetJudging();
 }
@@ -337,10 +357,12 @@ export function playGuide() {
   }
   resetJudging();
   update({ guidePlaying: true });
+  soundGuide();
 }
 
 export function stopGuide() {
   cueMetronome(null);
+  stopNotes();
   guidePausedAt = restPosition(snap.guide);
   update({ guidePlaying: false });
 }

@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { useIsLightMode } from "./UseTheme";
+import { updatePractice, useProfileValue } from "./profileStore";
 import {
   beginRecording, discardPending, endRecording, exportTakeMidi, fmtDuration,
-  guideScore, playGuide, stopGuide, tempoLabel, toggleLiveSync, unloadGuide, useTakes,
+  guideScore, playGuide, setGuideSound, stopGuide, tempoLabel, toggleLiveSync, unloadGuide, useTakes,
 } from "./takes";
 
 const REC = "#ef4444";
@@ -72,10 +73,18 @@ export function SyncButton({ base }: { base: React.CSSProperties }) {
   );
 }
 
-/** The unsaved take and the loaded guide take (above Bars / Score). */
-export default function TakeBar() {
+/** Whether TakePanel has anything to show. */
+export function useTakePanelVisible(): boolean {
+  const t = useTakes();
+  return (!!t.pending && !t.recording) || !!t.guide;
+}
+
+/** The unsaved take and the loaded guide take, stacked down the right of the views. */
+export default function TakePanel() {
   const t = useTakes();
   const light = useIsLightMode();
+  const sound = useProfileValue(d => d.practice.guideSound);
+  useEffect(() => { setGuideSound(sound); }, [sound]);
   useTicker(t.guidePlaying);
 
   const ink = light ? "rgba(26,15,46,0.75)" : "rgba(255,255,255,0.75)";
@@ -88,65 +97,92 @@ export default function TakeBar() {
     fontFamily: "monospace", fontSize: 10, letterSpacing: "0.06em",
     cursor: "pointer", borderRadius: 7, padding: "2px 8px",
     border: `0.5px solid ${line}`, background: "transparent", color: ink,
-    whiteSpace: "nowrap", lineHeight: "1.5",
+    whiteSpace: "nowrap", lineHeight: "1.5", width: "100%",
   };
-  const chip: React.CSSProperties = {
+  const close: React.CSSProperties = { ...btn, width: "auto", padding: "0 5px", fontSize: 9 };
+  const text: React.CSSProperties = {
     fontFamily: "monospace", fontSize: 10, whiteSpace: "nowrap",
-    overflow: "hidden", textOverflow: "ellipsis", minWidth: 0,
+    overflow: "hidden", textOverflow: "ellipsis", minWidth: 0, color: ink,
   };
+  const label: React.CSSProperties = { ...text, fontSize: 9, letterSpacing: "0.12em" };
+  const section: React.CSSProperties = {
+    flex: "1 0 auto", display: "flex", flexDirection: "column", justifyContent: "space-between", gap: 4,
+  };
+  const header: React.CSSProperties = { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4 };
 
   const score = t.guide ? guideScore() : null;
   const showPending = !!t.pending && !t.recording;
   if (!showPending && !t.guide) return null;
 
   return (
-    <div style={{
-      display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap",
-      rowGap: 4, marginBottom: 5, minHeight: 22,
-    }}>
-      {showPending && t.pending && (
-        <div style={{ display: "flex", alignItems: "center", gap: 5, minWidth: 0 }}>
-          <span style={{ ...chip, color: accent }}>
-            TAKE {fmtDuration(t.pending.durationMs)} · {t.pending.notes.length} notes
-            {t.pending.sync ? ` · ${tempoLabel(t.pending)}` : ""}
-          </span>
-          <button type="button" style={btn} title="Export as a MIDI file"
-            onClick={() => { if (t.pending) void exportTakeMidi(t.pending); }}>
-            MIDI
-          </button>
-          <button type="button" style={{ ...btn, padding: "2px 6px" }} title="Discard this take"
-            onClick={discardPending}>
-            ✕
-          </button>
-          <span style={{ ...chip, color: dim, fontSize: 9 }}>save it to a song in SONGS</span>
+    <>
+      {t.guide && (
+        <div style={section}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+            <div style={header}>
+              <span style={{ ...label, color: guideCol }}>GUIDE</span>
+              <button type="button" style={close} title="Remove guide" onClick={unloadGuide}>✕</button>
+            </div>
+            <span style={text} title={t.guide.name}>{t.guide.name}</span>
+            {(t.guide.sync || (score && score.judged > 0)) && (
+              <span style={{ ...text, color: dim }}>
+                {[t.guide.sync && tempoLabel(t.guide), score && score.judged > 0 && `${score.hit}/${score.total}`]
+                  .filter(Boolean).join(" · ")}
+              </span>
+            )}
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <button
+              type="button"
+              onClick={() => (t.guidePlaying ? stopGuide() : playGuide())}
+              style={{
+                ...btn, borderColor: guideCol, color: guideCol,
+                background: t.guidePlaying ? "rgba(245,185,113,0.14)" : "transparent",
+              }}
+            >
+              {t.guidePlaying ? "■ STOP" : "▶ PLAY"}
+            </button>
+            <button
+              type="button"
+              onClick={() => updatePractice({ guideSound: !sound })}
+              aria-pressed={sound}
+              title={sound ? "Mute the piano during playback" : "Sound out the take's notes on a piano during playback"}
+              style={{
+                ...btn,
+                ...(sound
+                  ? { borderColor: accent, color: accent, background: "rgba(175,169,236,0.12)" }
+                  : { color: dim }),
+              }}
+            >
+              {sound ? "♪ PIANO ON" : "♪ PIANO OFF"}
+            </button>
+          </div>
         </div>
       )}
 
-      {t.guide && (
-        <div style={{ display: "flex", alignItems: "center", gap: 5, minWidth: 0, marginLeft: "auto" }}>
-          <span style={{ ...chip, color: guideCol, maxWidth: 140 }} title={t.guide.name}>
-            GUIDE · {t.guide.name}
-          </span>
-          {t.guide.sync && <span style={{ ...chip, color: dim }}>{tempoLabel(t.guide)}</span>}
-          {score && score.judged > 0 && (
-            <span style={{ ...chip, color: dim }}>{score.hit}/{score.total}</span>
-          )}
-          <button
-            type="button"
-            onClick={() => (t.guidePlaying ? stopGuide() : playGuide())}
-            style={{
-              ...btn, borderColor: guideCol, color: guideCol,
-              background: t.guidePlaying ? "rgba(245,185,113,0.14)" : "transparent",
-            }}
-          >
-            {t.guidePlaying ? "■ STOP" : "▶ PLAY"}
-          </button>
-          <button type="button" style={{ ...btn, padding: "2px 6px" }} title="Remove guide"
-            onClick={unloadGuide}>
-            ✕
-          </button>
+      {t.guide && showPending && <div style={{ borderTop: `0.5px solid ${line}`, flexShrink: 0 }} />}
+
+      {showPending && t.pending && (
+        <div style={section}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+            <div style={header}>
+              <span style={{ ...label, color: accent }}>TAKE</span>
+              <button type="button" style={close} title="Discard this take" onClick={discardPending}>✕</button>
+            </div>
+            <span style={text}>{fmtDuration(t.pending.durationMs)} · {t.pending.notes.length} notes</span>
+            {t.pending.sync && <span style={{ ...text, color: dim }}>{tempoLabel(t.pending)}</span>}
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+            <button type="button" style={btn} title="Export as a MIDI file"
+              onClick={() => { if (t.pending) void exportTakeMidi(t.pending); }}>
+              MIDI
+            </button>
+            <span style={{ ...text, color: dim, fontSize: 9, whiteSpace: "normal", lineHeight: 1.3 }}>
+              save it to a song in SONGS
+            </span>
+          </div>
         </div>
       )}
-    </div>
+    </>
   );
 }

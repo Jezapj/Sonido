@@ -6,7 +6,7 @@ import { resetPitchTracker, startPitchTracker } from "./pitchTracker";
 import { NoteBarsView, NotationView, type NotationMode } from "./NoteViews";
 import { PianoHandControls, PianoView } from "./PianoView";
 import { HAND_TONES, type HandLook } from "./handRig";
-import TakeBar, { RecButton, SyncButton } from "./TakeBar";
+import TakePanel, { RecButton, SyncButton, useTakePanelVisible } from "./TakeBar";
 import { useTakes } from "./takes";
 import { getProfile, updatePractice } from "./profileStore";
 
@@ -530,6 +530,18 @@ export default function RustStreamExample() {
     lineHeight: "1.5",
   };
 
+  // Side panels take the views' height (never set it) and line up with their frames
+  const takePanel = useTakePanelVisible();
+  const sidePanel = (width: number): React.CSSProperties => ({
+    width, flexShrink: 0, position: "relative", marginBottom: 8,
+    border: `0.5px solid ${light ? "rgba(0,0,0,0.12)" : "rgba(255,255,255,0.12)"}`,
+    borderRadius: 10, overflow: "hidden",
+  });
+  const sidePanelInner: React.CSSProperties = {
+    position: "absolute", inset: 0, padding: 6, boxSizing: "border-box",
+    display: "flex", flexDirection: "column", gap: 6, overflowY: "auto",
+  };
+
   // ── Render ─────────────────────────────────────────────────────────────────
 
   // With no backing track loaded, the views grow to fill the card
@@ -603,16 +615,6 @@ export default function RustStreamExample() {
               ))}
             </div>
           )}
-          {view === 3 && (
-            <PianoHandControls
-              on={handsOn}
-              look={handLook}
-              onToggle={() => setHandsOn(v => !v)}
-              onLook={setHandLook}
-              base={btn}
-              accent={viewAccent}
-            />
-          )}
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -672,7 +674,25 @@ export default function RustStreamExample() {
         </div>
       </div>
 
-      <TakeBar />
+      {/* ── Views, flanked by the hand settings (piano) and the take panel ─── */}
+      <div style={{
+        display: "flex", gap: 6, alignItems: "stretch",
+        ...(expanded && { flex: 1, minHeight: 0 }),
+      }}>
+      {view === 3 && (
+        <div style={sidePanel(72)}>
+          <div style={sidePanelInner}>
+            <PianoHandControls
+              on={handsOn}
+              look={handLook}
+              onToggle={() => setHandsOn(v => !v)}
+              onLook={setHandLook}
+              base={btn}
+              accent={viewAccent}
+            />
+          </div>
+        </div>
+      )}
 
       {/* ── Swappable views: waveform+stats / bars / score ─────────────────── */}
       <div
@@ -681,6 +701,7 @@ export default function RustStreamExample() {
         onPointerUp={onViewPointerUp}
         onPointerCancel={onViewPointerUp}
         style={{
+          flex: 1, minWidth: 0,
           overflow: "hidden",
           touchAction: "pan-y",
           cursor: dragging ? "grabbing" : "grab",
@@ -745,6 +766,15 @@ export default function RustStreamExample() {
         <PianoView active={view === 3 || dragging} hands={handsOn ? handLook : null} />
       </div>
       </div>
+      </div>
+
+      {takePanel && (
+        <div style={sidePanel(124)}>
+          <div style={sidePanelInner}>
+            <TakePanel />
+          </div>
+        </div>
+      )}
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════════ */}

@@ -325,7 +325,10 @@ function placeBar(
 
 const SWATCH_RING = "rgba(255,255,255,0.5)";
 
-/** The HANDS switch and, while on, the choice of outline or a skin tone. */
+const toneName = (l: HandLook) => (l === "outline" ? "Outline" : `${l[0].toUpperCase()}${l.slice(1)} skin tone`);
+
+/** The HANDS switch above the choice of outline or a skin tone, stacked to fill a side panel.
+ *  Picking a look while the hands are hidden shows them. */
 export function PianoHandControls({ on, look, onToggle, onLook, base, accent }: {
   on: boolean;
   look: HandLook;
@@ -336,36 +339,45 @@ export function PianoHandControls({ on, look, onToggle, onLook, base, accent }: 
 }) {
   const looks = ["outline", ...Object.keys(HAND_TONES)] as HandLook[];
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+    <>
       <button
         type="button"
         onClick={onToggle}
+        aria-pressed={on}
         title={on ? "Hide the hands" : "Show the hands"}
         style={{
           ...base,
+          width: "100%", flexShrink: 0,
           fontSize: 9, letterSpacing: "0.08em", padding: "2px 7px",
           ...(on && { borderColor: accent, color: accent, background: "rgba(175,169,236,0.12)" }),
         }}
       >
         HANDS
       </button>
-      {on && looks.map(l => (
-        <button
-          key={l}
-          type="button"
-          onClick={() => onLook(l)}
-          title={l === "outline" ? "Outline" : `${l[0].toUpperCase()}${l.slice(1)} skin tone`}
-          aria-label={l === "outline" ? "Outline hands" : `${l} skin tone`}
-          aria-pressed={look === l}
-          style={{
-            width: 12, height: 12, padding: 0, borderRadius: "50%", cursor: "pointer", flexShrink: 0,
-            background: l === "outline" ? "transparent" : HAND_TONES[l],
-            border: l === "outline" ? "1.5px solid #7a5cff" : "none",
-            boxShadow: look === l ? `0 0 0 1.5px ${accent}` : `0 0 0 0.5px ${SWATCH_RING}`,
-          }}
-        />
-      ))}
-    </div>
+      <div style={{
+        flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: "repeat(2, 1fr)",
+        gridAutoRows: "minmax(16px, 1fr)", gap: 4, placeItems: "center",
+        opacity: on ? 1 : 0.4, transition: "opacity 0.15s",
+      }}>
+        {looks.map(l => (
+          <button
+            key={l}
+            type="button"
+            onClick={() => { onLook(l); if (!on) onToggle(); }}
+            title={toneName(l)}
+            aria-label={l === "outline" ? "Outline hands" : `${l} skin tone`}
+            aria-pressed={on && look === l}
+            style={{
+              width: 14, height: 14, padding: 0, borderRadius: "50%", cursor: "pointer",
+              ...(l === "outline" && { gridColumn: "1 / -1" }),
+              background: l === "outline" ? "transparent" : HAND_TONES[l],
+              border: l === "outline" ? "1.5px solid #7a5cff" : "none",
+              boxShadow: look === l ? `0 0 0 2px ${accent}` : `0 0 0 0.5px ${SWATCH_RING}`,
+            }}
+          />
+        ))}
+      </div>
+    </>
   );
 }
 

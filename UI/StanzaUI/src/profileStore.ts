@@ -32,6 +32,7 @@ export interface PracticeDefaults {
   volume: number;
   handsOn: boolean;
   handLook: string;
+  guideSound: boolean;
 }
 
 export interface ProfileData {
@@ -60,7 +61,7 @@ export interface ProfileState {
   error: string | null;
 }
 
-const DEFAULT_PRACTICE: PracticeDefaults = { bpm: 120, sigIdx: 2, volume: 0.7, handsOn: false, handLook: "outline" };
+const DEFAULT_PRACTICE: PracticeDefaults = { bpm: 120, sigIdx: 2, volume: 0.7, handsOn: false, handLook: "outline", guideSound: false };
 
 function blank(name: string): ProfileData {
   return {
