@@ -254,7 +254,7 @@ const Settings: React.FC<SettingsProps> = ({
             </div>
             <div className="settings-info-row">
               <span className="settings-info-label">Version</span>
-              <span className="settings-info-value settings-info-value--mono">0.1.0</span>
+              <span className="settings-info-value settings-info-value--mono">1.0.0</span>
             </div>
             <div className="settings-info-row">
               <span className="settings-info-label">Runtime</span>

@@ -1,8 +1,10 @@
+mod mic;
 mod monitor;
 
 use tauri::Emitter;
 use std::io::{Read, Write};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::collections::HashMap;
 use tauri::Manager;
 use tauri::Window;
@@ -77,6 +79,17 @@ pub struct LooperInfo {
 
 pub struct SerialWritePort(pub Mutex<Option<Box<dyn serialport::SerialPort + Send>>>);
 pub struct LastParamsStore(pub Mutex<HashMap<u8, (bool, Vec<f32>)>>);
+
+/// Which input feeds the looper, monitor and `audio_chunk`. The serial task
+/// keeps draining its port while another source (or none) is active.
+pub struct ActiveSource(pub AtomicU8);
+const SOURCE_NONE: u8 = 0;
+const SOURCE_SERIAL: u8 = 1;
+const SOURCE_MIC: u8 = 2;
+
+fn source_is(app: &tauri::AppHandle, source: u8) -> bool {
+    app.state::<ActiveSource>().0.load(Ordering::Acquire) == source
+}
 
 pub struct MuteState {
     pub is_muted:      Mutex<bool>,
@@ -417,18 +430,73 @@ async fn stream_audio(app: tauri::AppHandle) {
     });
 }
 
+/// One chunk of live input, from the board or a microphone: looper capture and
+/// playback, the native monitor, and the `audio_chunk` event.
+///   - Recording   → append i16 samples; monitor stays live
+///   - Playing     → loop into monitor (optionally mute live via monitor_live)
+///   - Overdubbing → same monitor behaviour + overdub into buffer
+///   - Idle/Stopped/Clear → normal live monitor passthrough
+fn process_input(app: &tauri::AppHandle, mut chunk_f32: Vec<f32>, chunk_i16: &[i16], info_tick: &mut u32) {
+    // Visuals and pitch tracking follow the live input, never the loop mix.
+    let live_f32 = chunk_f32.clone();
+
+    // ── Looper: capture + live-monitor playback ───────────────────────
+    {
+        let state = app.state::<LoopState>();
+        let mut lb = state.0.lock().unwrap();
+        match lb.state {
+            LooperState::Recording => {
+                lb.samples.extend_from_slice(chunk_i16);
+            }
+            LooperState::Playing => {
+                let slice = take_playback_chunk(&mut lb, chunk_i16.len());
+                let mix = lb.mix;
+                let monitor_live = lb.monitor_live;
+                let loop_f: Vec<f32> = slice
+                    .iter()
+                    .map(|&s| s as f32 / 32767.0)
+                    .collect();
+                apply_loop_to_monitor(&mut chunk_f32, &loop_f, mix, monitor_live);
+            }
+            LooperState::Overdubbing => {
+                let loop_preview = peek_loop_chunk(&lb, chunk_f32.len());
+                let mix = lb.mix;
+                let monitor_live = lb.monitor_live;
+                overdub_and_advance(&mut lb, chunk_i16);
+                apply_loop_to_monitor(&mut chunk_f32, &loop_preview, mix, monitor_live);
+            }
+            // Idle / Stopped → leave chunk_f32 as live passthrough
+            _ => {}
+        }
+    }
+
+    // ── Throttled looper_info event (~10 Hz) ──────────────────────────
+    *info_tick += chunk_i16.len() as u32;
+    if *info_tick >= 4800 {
+        *info_tick = 0;
+        let state = app.state::<LoopState>();
+        let lb    = state.0.lock().unwrap();
+        let info  = snapshot(&lb);
+        drop(lb);
+        let _ = app.emit("looper_info", info);
+    }
+
+    // The speakers get the loop mix; the event carries only the live
+    // input for waveforms, pitch tracking, and the UI.
+    app.state::<monitor::NativeMonitor>().push(&chunk_f32);
+    let _ = app.emit("audio_chunk", &live_f32);
+}
+
 /// Open a serial port and stream audio.
 ///
 /// Architecture: the ESP32 sends processed audio to the host one-way.
 /// The looper buffer lives on the host. `chunk_f32` is what the monitor
 /// should hear and is pushed to the native output; the untouched live input
-/// is emitted as `audio_chunk` for visuals and pitch tracking.
-///   - Recording   → append i16 samples; monitor stays live
-///   - Playing     → loop into monitor (optionally mute live via monitor_live)
-///   - Overdubbing → same monitor behaviour + overdub into buffer
-///   - Idle/Stopped/Clear → normal live monitor passthrough
+/// is emitted as `audio_chunk` for visuals and pitch tracking (see `process_input`).
 #[tauri::command]
 async fn stream_audio_serial(app: tauri::AppHandle, port_name: String, baud_rate: u32) {
+    app.state::<mic::MicInput>().stop();
+    app.state::<ActiveSource>().0.store(SOURCE_SERIAL, Ordering::Release);
     {
         let state = app.state::<SerialWritePort>();
         if state.0.lock().unwrap().is_some() {
@@ -467,54 +535,9 @@ async fn stream_audio_serial(app: tauri::AppHandle, port_name: String, baud_rate
                     }
                     if chunk_i16.is_empty() { continue; }
 
-                    // Visuals and pitch tracking follow the live input, never the loop mix.
-                    let live_f32 = chunk_f32.clone();
-
-                    // ── Looper: capture + live-monitor playback ───────────────────────
-                    {
-                        let state = app.state::<LoopState>();
-                        let mut lb = state.0.lock().unwrap();
-                        match lb.state {
-                            LooperState::Recording => {
-                                lb.samples.extend_from_slice(&chunk_i16);
-                            }
-                            LooperState::Playing => {
-                                let slice = take_playback_chunk(&mut lb, chunk_i16.len());
-                                let mix = lb.mix;
-                                let monitor_live = lb.monitor_live;
-                                let loop_f: Vec<f32> = slice
-                                    .iter()
-                                    .map(|&s| s as f32 / 32767.0)
-                                    .collect();
-                                apply_loop_to_monitor(&mut chunk_f32, &loop_f, mix, monitor_live);
-                            }
-                            LooperState::Overdubbing => {
-                                let loop_preview = peek_loop_chunk(&lb, chunk_f32.len());
-                                let mix = lb.mix;
-                                let monitor_live = lb.monitor_live;
-                                overdub_and_advance(&mut lb, &chunk_i16);
-                                apply_loop_to_monitor(&mut chunk_f32, &loop_preview, mix, monitor_live);
-                            }
-                            // Idle / Stopped → leave chunk_f32 as live passthrough
-                            _ => {}
-                        }
+                    if source_is(&app, SOURCE_SERIAL) {
+                        process_input(&app, chunk_f32, &chunk_i16, &mut info_tick);
                     }
-
-                    // ── Throttled looper_info event (~10 Hz) ──────────────────────────
-                    info_tick += chunk_i16.len() as u32;
-                    if info_tick >= 4800 {
-                        info_tick = 0;
-                        let state = app.state::<LoopState>();
-                        let lb    = state.0.lock().unwrap();
-                        let info  = snapshot(&lb);
-                        drop(lb);
-                        let _ = app.emit("looper_info", info);
-                    }
-
-                    // The speakers get the loop mix; the event carries only the live
-                    // input for waveforms, pitch tracking, and the UI.
-                    app.state::<monitor::NativeMonitor>().push(&chunk_f32);
-                    let _ = app.emit("audio_chunk", &live_f32);
                 }
 
                 Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => {}
@@ -525,6 +548,46 @@ async fn stream_audio_serial(app: tauri::AppHandle, port_name: String, baud_rate
 
         *app.state::<SerialWritePort>().0.lock().unwrap() = None;
     });
+}
+
+/// Microphones and other audio inputs, the system default first.
+#[tauri::command]
+async fn list_audio_inputs() -> Vec<String> {
+    tauri::async_runtime::spawn_blocking(mic::list_inputs).await.unwrap_or_default()
+}
+
+/// Use a microphone / audio interface input instead of the board.
+#[tauri::command]
+async fn stream_audio_mic(app: tauri::AppHandle, device_name: String) -> Result<(), String> {
+    app.state::<ActiveSource>().0.store(SOURCE_MIC, Ordering::Release);
+    let feed = app.clone();
+    let mut info_tick: u32 = 0;
+    let started = tauri::async_runtime::spawn_blocking(move || {
+        let handle = feed.clone();
+        feed.state::<mic::MicInput>().start(device_name, move |chunk_f32| {
+            if !source_is(&handle, SOURCE_MIC) { return; }
+            let chunk_i16: Vec<i16> = chunk_f32
+                .iter()
+                .map(|&x| (x.clamp(-1.0, 1.0) * i16::MAX as f32) as i16)
+                .collect();
+            process_input(&handle, chunk_f32, &chunk_i16, &mut info_tick);
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    if started.is_err() {
+        let _ = app.state::<ActiveSource>().0.compare_exchange(
+            SOURCE_MIC, SOURCE_NONE, Ordering::AcqRel, Ordering::Acquire,
+        );
+    }
+    started
+}
+
+/// Disconnect: stop the microphone and stop feeding the board's audio onwards.
+#[tauri::command]
+fn stop_audio_input(app: tauri::AppHandle) {
+    app.state::<ActiveSource>().0.store(SOURCE_NONE, Ordering::Release);
+    app.state::<mic::MicInput>().stop();
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -659,6 +722,8 @@ pub fn run() {
         })
         .manage(LoopState(Mutex::new(LoopBuffer::default())))
         .manage(monitor::NativeMonitor::new())
+        .manage(mic::MicInput::new())
+        .manage(ActiveSource(AtomicU8::new(SOURCE_NONE)))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
@@ -671,6 +736,9 @@ pub fn run() {
             list_serial_ports,
             stream_audio,
             stream_audio_serial,
+            list_audio_inputs,
+            stream_audio_mic,
+            stop_audio_input,
             update_dsp_params,
             set_output_mute,
             set_native_monitor,

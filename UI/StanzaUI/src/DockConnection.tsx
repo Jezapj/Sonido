@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useSerialStream } from "./useSerialStream";
+import { isMicSource, MIC_PREFIX, sourceName, useSerialStream } from "./useSerialStream";
 
 type Theme = "light" | "dark";
 
@@ -13,6 +13,7 @@ export default function DockConnection({
   const light = theme === "light";
   const {
     ports,
+    mics,
     selectedPort,
     setSelectedPort,
     connected,
@@ -26,6 +27,8 @@ export default function DockConnection({
     light ? "dock-conn--light" : "",
     connected ? "dock-conn--connected" : "",
   ].filter(Boolean).join(" ");
+  const mic = isMicSource(selectedPort);
+  const none = ports.length === 0 && mics.length === 0;
   const action = light ? "dock-conn-btn dock-conn-action is-light" : "dock-conn-btn dock-conn-action";
 
   return (
@@ -35,25 +38,36 @@ export default function DockConnection({
           {connected ? (
             <div className="dock-conn-status">
               <span className="dock-conn-dot" />
-              <span>Connected: {selectedPort}</span>
+              <span title={sourceName(selectedPort)}>
+                {mic ? "Mic" : "Connected"}: {sourceName(selectedPort)}
+              </span>
             </div>
           ) : (
             <>
-              <span className="dock-conn-label">COMM</span>
+              <span className="dock-conn-label">{mic ? "MIC" : "COMM"}</span>
               <select
                 value={selectedPort}
                 onChange={e => setSelectedPort(e.target.value)}
-                aria-label="Serial port"
+                aria-label="Audio input: board serial port or microphone"
+                title={sourceName(selectedPort)}
               >
-                {ports.length === 0
-                  ? <option value="">No ports found</option>
-                  : ports.map(p => <option key={p} value={p}>{p}</option>)}
+                {none && <option value="">No inputs found</option>}
+                {ports.length > 0 && (
+                  <optgroup label="Stanza board">
+                    {ports.map(p => <option key={p} value={p}>{p}</option>)}
+                  </optgroup>
+                )}
+                {mics.length > 0 && (
+                  <optgroup label="Microphone">
+                    {mics.map(m => <option key={m} value={MIC_PREFIX + m}>{m}</option>)}
+                  </optgroup>
+                )}
               </select>
               <button
                 type="button"
                 className="dock-conn-btn"
                 onClick={() => { void refreshPorts(); }}
-                title="Refresh ports"
+                title="Refresh ports and microphones"
               >
                 ↺
               </button>

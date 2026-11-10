@@ -1,7 +1,8 @@
 /**
  * useSerialStream
  *
- * Single shared serial connection for the whole app.
+ * Single shared audio input for the whole app: the board over serial, or a
+ * microphone / audio interface. Both arrive as the same `audio_chunk` events.
  * Connect / disconnect from DashboardAudio; every consumer that calls
  * useSerialStream() sees the same `connected` / `selectedPort` state and
  * receives the same `audio_chunk` events.
@@ -13,8 +14,15 @@ import { listen, UnlistenFn } from '@tauri-apps/api/event';
 
 export const BAUD_RATE = 2000000; // must match Serial.begin() in the .ino
 
+/** Sources are serial port names, or MIC_PREFIX + an input device name. */
+export const MIC_PREFIX = 'mic:';
+export const isMicSource = (source: string) => source.startsWith(MIC_PREFIX);
+export const sourceName = (source: string) => (isMicSource(source) ? source.slice(MIC_PREFIX.length) : source);
+
 export interface SerialStreamControls {
   ports: string[];
+  /** Microphone / audio-interface inputs, the system default first. */
+  mics: string[];
   selectedPort: string;
   setSelectedPort: (p: string) => void;
   connected: boolean;
@@ -28,6 +36,7 @@ export interface SerialStreamControls {
 type ChunkHandler = (samples: number[]) => void;
 
 let sharedPorts: string[] = [];
+let sharedMics: string[] = [];
 let sharedSelectedPort = '';
 let sharedConnected = false;
 let chunkUnlisten: UnlistenFn | null = null;
@@ -52,16 +61,24 @@ async function ensureChunkListener() {
 }
 
 async function sharedRefreshPorts() {
-  try {
-    const list = await invoke<string[]>('list_serial_ports');
-    sharedPorts = list;
-    if (sharedSelectedPort === '' && list.length > 0) {
-      sharedSelectedPort = list[0];
-    }
-    notifyState();
-  } catch (e) {
-    console.warn('[useSerialStream] list_serial_ports failed:', e);
+  const [ports, mics] = await Promise.all([
+    invoke<string[]>('list_serial_ports').catch(e => {
+      console.warn('[useSerialStream] list_serial_ports failed:', e);
+      return sharedPorts;
+    }),
+    invoke<string[]>('list_audio_inputs').catch(e => {
+      console.warn('[useSerialStream] list_audio_inputs failed:', e);
+      return sharedMics;
+    }),
+  ]);
+  sharedPorts = ports;
+  sharedMics = mics;
+  // Keep the choice while it is still there; otherwise prefer the board
+  const sources = [...ports, ...mics.map(m => MIC_PREFIX + m)];
+  if (!sources.includes(sharedSelectedPort) && !sharedConnected) {
+    sharedSelectedPort = sources[0] ?? '';
   }
+  notifyState();
 }
 
 async function sharedConnect() {
@@ -77,16 +94,22 @@ async function sharedConnect() {
 
   connecting = (async () => {
     await ensureChunkListener();
-    await invoke('stream_audio_serial', {
-      portName: sharedSelectedPort,
-      baudRate: BAUD_RATE,
-    });
+    if (isMicSource(sharedSelectedPort)) {
+      await invoke('stream_audio_mic', { deviceName: sourceName(sharedSelectedPort) });
+    } else {
+      await invoke('stream_audio_serial', {
+        portName: sharedSelectedPort,
+        baudRate: BAUD_RATE,
+      });
+    }
     sharedConnected = true;
     notifyState();
   })();
 
   try {
     await connecting;
+  } catch (e) {
+    console.warn('[useSerialStream] could not open', sharedSelectedPort, e);
   } finally {
     connecting = null;
   }
@@ -97,7 +120,8 @@ function sharedDisconnect() {
   chunkUnlisten = null;
   sharedConnected = false;
   notifyState();
-  // Rust stream task may keep running; reconnect is idempotent.
+  // Releases a microphone; the serial task keeps draining its port (reconnect is idempotent).
+  invoke('stop_audio_input').catch(e => console.warn('[useSerialStream] stop_audio_input failed:', e));
 }
 
 function sharedSetSelectedPort(p: string) {
@@ -163,6 +187,7 @@ export function useSerialStream(
 
   return {
     ports: sharedPorts,
+    mics: sharedMics,
     selectedPort: sharedSelectedPort,
     setSelectedPort,
     connected: sharedConnected,
