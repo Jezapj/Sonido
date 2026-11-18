@@ -566,25 +566,29 @@ export default function RustStreamExample() {
     >
 
       {/* ── Status badge + monitor controls ──────────────────────────────── */}
-      <div style={{
+      {/* The rse-* class names are hooks for the touch layout (touch/TouchShell.css); they carry no desktop styles */}
+      <div className="rse-head" style={{
         display: "flex", justifyContent: "space-between", marginBottom: 5,
         alignItems: "center", gap: 8, flexWrap: "wrap", rowGap: 4,
       }}>
 
         {/* View selector */}
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <button type="button" onClick={() => goView(-1)} style={{ ...btn, padding: "2px 8px" }}>‹</button>
-          <span style={{
+        <div className="rse-viewsel" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <button type="button" className="rse-arrow" onClick={() => goView(-1)} style={{ ...btn, padding: "2px 8px" }}>‹</button>
+          <span className="rse-viewlabel" style={{
             fontSize: 10, letterSpacing: "0.12em", minWidth: 38, textAlign: "center",
             color: light ? "rgba(26,15,46,0.48)" : "rgba(255,255,255,0.45)",
           }}>
             {VIEW_LABELS[view]}
           </span>
-          <div style={{ display: "flex", gap: 5 }}>
+          <div className="rse-dots" style={{ display: "flex", gap: 5 }}>
             {VIEW_LABELS.map((label, i) => (
               <button
                 key={label}
                 type="button"
+                className="rse-dot"
+                data-label={label}
+                data-on={i === view}
                 onClick={() => setView(i)}
                 aria-label={`Show ${label} view`}
                 style={{
@@ -596,13 +600,14 @@ export default function RustStreamExample() {
               />
             ))}
           </div>
-          <button type="button" onClick={() => goView(1)} style={{ ...btn, padding: "2px 8px" }}>›</button>
+          <button type="button" className="rse-arrow" onClick={() => goView(1)} style={{ ...btn, padding: "2px 8px" }}>›</button>
           {view === 2 && (
-            <div style={{ display: "flex" }}>
+            <div className="rse-scoremode" style={{ display: "flex" }}>
               {(["staff", "tab"] as const).map((m, i) => (
                 <button
                   key={m}
                   type="button"
+                  aria-pressed={scoreMode === m}
                   onClick={() => setScoreMode(m)}
                   style={{
                     ...btn,
@@ -642,8 +647,8 @@ export default function RustStreamExample() {
           )}
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <span style={{
+        <div className="rse-actions" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span className="rse-live" style={{
           fontSize: 11, padding: "1px 10px", borderRadius: 99,
           background: connected ? "rgba(83,74,183,0.25)" : "rgba(255,255,255,0.08)",
           color: connected ? "#AFA9EC" : "rgba(255,255,255,0.4)",
@@ -700,12 +705,12 @@ export default function RustStreamExample() {
       </div>
 
       {/* ── Views, flanked by the hand settings (piano) and the take panel ─── */}
-      <div style={{
+      <div className="rse-body" style={{
         display: "flex", gap: 6, alignItems: "stretch",
         ...(expanded && { flex: 1, minHeight: 0 }),
       }}>
       {view === 3 && (
-        <div style={sidePanel(72)}>
+        <div className="rse-side" style={sidePanel(72)}>
           <div style={sidePanelInner}>
             <PianoHandControls
               on={handsOn}
@@ -721,6 +726,7 @@ export default function RustStreamExample() {
 
       {/* ── Swappable views: waveform+stats / bars / score ─────────────────── */}
       <div
+        className="rse-swap"
         onPointerDown={onViewPointerDown}
         onPointerMove={onViewPointerMove}
         onPointerUp={onViewPointerUp}
@@ -733,20 +739,20 @@ export default function RustStreamExample() {
           ...(expanded && { flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }),
         }}
       >
-      <div style={{
+      <div className="rse-track" style={{
         display: "flex",
         width: `${VIEW_COUNT * 100}%`,
         transform: `translateX(calc(${-view * 100 / VIEW_COUNT}% + ${dragging ? dragX : 0}px))`,
         transition: dragging ? "none" : "transform 0.28s cubic-bezier(0.22, 1, 0.36, 1)",
         ...(expanded && { flex: 1, minHeight: 0 }),
       }}>
-      <div style={{
+      <div className="rse-wavecol" style={{
         width: `${100 / VIEW_COUNT}%`, minWidth: 0,
         ...(expanded && { display: "flex", flexDirection: "column" }),
       }}>
 
       {/* ── Guitar waveform canvas ─────────────────────────────────────────── */}
-      <div style={{
+      <div className="rse-wave" style={{
         border: "0.5px solid rgba(255,255,255,0.12)",
         borderRadius: 10, overflow: "hidden", marginBottom: 1,
         position: "relative",
@@ -757,7 +763,7 @@ export default function RustStreamExample() {
       </div>
 
       {/* ── Stats row ─────────────────────────────────────────────────────── */}
-      <div style={{
+      <div className="rse-stats" style={{
         display: "grid", gridTemplateColumns: "repeat(3,1fr)",
         gap: 6, marginBottom: 8,
       }}>
@@ -794,7 +800,7 @@ export default function RustStreamExample() {
       </div>
 
       {takePanel && (
-        <div style={sidePanel(124)}>
+        <div className="rse-side" style={sidePanel(124)}>
           <div style={sidePanelInner}>
             <TakePanel />
           </div>
@@ -989,7 +995,7 @@ export default function RustStreamExample() {
             
           </>
         ) : (
-          <div style={{
+          <div className="rse-backing-hint" style={{
             fontSize: 11, color: "rgba(255,255,255,0.16)",
             textAlign: "center", padding: "2px 0",
             letterSpacing: "0.03em",

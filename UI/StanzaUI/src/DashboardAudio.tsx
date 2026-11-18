@@ -41,7 +41,7 @@ const wrapPage = (p: number) => ((p % PANEL_COUNT) + PANEL_COUNT) % PANEL_COUNT;
 
 const PANEL_LABELS = ["FFT", "SONGS", "METRO", "TUNER"];
 
-function fft(re: Float32Array, im: Float32Array) {
+export function fft(re: Float32Array, im: Float32Array) {
   const N = re.length;
   for (let i = 0, j = 0; i < N; i++) {
     if (j > i) {

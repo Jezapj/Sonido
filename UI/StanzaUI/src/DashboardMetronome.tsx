@@ -56,7 +56,26 @@ const btnBase: React.CSSProperties = {
   whiteSpace: "nowrap" as const,
 };
 
-const DashboardMetronome: FC = () => {
+/** What a custom layout gets to draw the metronome with (see `render`). */
+export interface MetronomeControls {
+  bpm: number;
+  setBpm: (bpm: number) => void;
+  sig: TimeSig;
+  cycleSig: (dir: -1 | 1) => void;
+  accents: boolean[];
+  toggleAccent: (beat: number) => void;
+  activeBeat: number;
+  volume: number;
+  setVolume: (volume: number) => void;
+  running: boolean;
+  toggle: () => void;
+}
+
+export const BPM_MIN = 40;
+export const BPM_MAX = 240;
+
+/** `render` swaps the dashboard layout for another one (the touch screen) on the same engine. */
+const DashboardMetronome: FC<{ render?: (m: MetronomeControls) => React.ReactNode }> = ({ render }) => {
   const [bpm, setBpm] = useState(() => getProfile().practice.bpm);
   const [sigIdx, setSigIdx] = useState(() => {
     const saved = getProfile().practice.sigIdx;
@@ -225,6 +244,25 @@ const DashboardMetronome: FC = () => {
   useEffect(() => {
     setAccents(prev => (prev.length === sig.beats ? prev : defaultAccents(sig)));
   }, [sig]);
+
+  if (render) {
+    return render({
+      bpm,
+      setBpm: v => {
+        const next = Math.round(Math.min(BPM_MAX, Math.max(BPM_MIN, v)));
+        setBpm(next);
+        updatePractice({ bpm: next });
+      },
+      sig, cycleSig, accents, toggleAccent, activeBeat,
+      volume,
+      setVolume: v => {
+        const next = Math.min(1, Math.max(0, v));
+        setVolume(next);
+        updatePractice({ volume: next });
+      },
+      running, toggle,
+    });
+  }
 
   return (
     <div

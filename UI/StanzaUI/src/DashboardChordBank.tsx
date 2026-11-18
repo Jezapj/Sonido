@@ -432,7 +432,8 @@ const DashboardChordBank: FC<{ size?: { w: number; h: number } }> = ({ size }) =
       onPointerDown={e => onSongPointerDown(e, s.id)}
       onPointerMove={onSongPointerMove}
       onPointerUp={onSongPointerUp}
-      onPointerCancel={onSongPointerUp}
+      // A cancelled press (the touch layout lets a finger scroll the list) must not open or move the song
+      onPointerCancel={() => { dragRef.current = null; setDraggingId(null); setDropId(null); }}
       style={{
         ...btnBase,
         textAlign: "left",

@@ -29,7 +29,7 @@ const LOOPER_ITEMS = new Set(['Looper']);
 
 // ── Defaults ──────────────────────────────────────────────────────────────────
 
-const DEFAULT_ITEMS: GalleryItem[] = [
+export const DEFAULT_ITEMS: GalleryItem[] = [
   { image: '/L_EQPreGain_pedal.png',      text: 'Blurry Lights'},
   { image: '/L_OD_pedal.png',             text: 'New York'     },
   { image: '/L_Reverb(Spring)_pedal.png', text: 'Bridge'       },

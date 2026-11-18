@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import "./App.css";
-import "./CompactLayout.css";
 
 import FloatingLines from './FloatingLines';
 import { VscHome, VscArchive, VscAccount, VscSettingsGear } from "react-icons/vsc";
@@ -16,10 +15,12 @@ import Settings, { AppSettings } from './Settings';
 import TextType from './TextType';
 import type { PedalState } from './PedalOverlay';
 import { enterProfile, initProfile, updateProfile, useProfileValue, type Theme } from './profileStore';
+import TouchShell from './touch/TouchShell';
 
 // ── Compact layout hook — activates at 800×480 and similar small screens ──────
 // Detects via window dimensions and syncs a data-compact attribute to the root
-// element so CSS can apply targeted overrides without any prop drilling.
+// element. While it is on, the dashboard, dock and pages below are replaced by
+// the touch layout (touch/TouchShell.tsx); the desktop view is untouched.
 
 function useCompactLayout(): boolean {
   const [isCompact, setIsCompact] = useState(
@@ -133,7 +134,7 @@ function App() {
     />
   );
 
-  const showDock = view !== "landing";
+  const showDock = view !== "landing" && !isCompact;
 
   return (
     <>
@@ -189,10 +190,10 @@ function App() {
       {/* ── LANDING ── */}
       {view === "landing" && (
         <>
-          <button onClick={handleToggle} style={{ position: 'fixed', top: 20, right: 20, zIndex: 1 }}>
+          <button className="landing-fullscreen" onClick={handleToggle} style={{ position: 'fixed', top: 20, right: 20, zIndex: 1 }}>
             Toggle Fullscreen
           </button>
-          <main className="container">
+          <main className="container landing">
             <TextType
               typingSpeed={75}
               pauseDuration={1500}
@@ -220,15 +221,26 @@ function App() {
         </>
       )}
 
+      {/* ── SMALL TOUCHSCREEN — every view below, as one touch layout ── */}
+      {isCompact && view !== "landing" && (
+        <TouchShell
+          theme={theme}
+          onThemeChange={handleThemeChange}
+          username={username}
+          settings={settings}
+          onSettingsChange={handleSettingsChange}
+          pedalStates={pedalStates}
+          onPedalStatesChange={setPedalStates}
+          onPresetSaved={handlePresetSaved}
+          onFullscreen={handleToggle}
+        />
+      )}
+
       {/* ── MAIN ── */}
-      {view === "main" && (
+      {!isCompact && view === "main" && (
         <>
           <button onClick={handleToggle} style={{ position: 'fixed', top: 20, right: 20, zIndex: 1 }}>^</button>
-          {/*
-            Compact mode (800×480): zero top/bottom padding so the card grid can fill
-            the viewport. Normal mode keeps the original 5vh top offset.
-          */}
-          <main className="container" style={{ padding: isCompact ? "0 0.5vw" : "5vh 0.5vw 0vh 0.5vw" }}>
+          <main className="container" style={{ padding: "5vh 0.5vw 0vh 0.5vw" }}>
             <div>
               <MagicBento
                 textAutoHide={true}
@@ -248,46 +260,40 @@ function App() {
                 onPresetSaved={handlePresetSaved}
               />
 
-              {/* 3D model viewer — hidden on compact (800×480) screens */}
-              {!isCompact && (
-                <div style={{ scale: "90%", top: '16vh', right: '80px', position: 'absolute', zIndex: -1 }}>
-                  <ModelViewer
-                    url="https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/main/2.0/ToyCar/glTF-Binary/ToyCar.glb"
-                    width={"15vw"} height={"15vh"}
-                    modelXOffset={0} modelYOffset={0}
-                    enableMouseParallax enableHoverRotation
-                    environmentPreset="forest"
-                    fadeIn={true} autoRotate={true} autoRotateSpeed={0.35}
-                    showScreenshotButton={false}
-                  />
-                </div>
-              )}
-
-              {/* Logo — hidden on compact (would be off-screen due to negative top offset) */}
-              {!isCompact && (
-                <img
-                  className="logoMain"
-                  style={{ scale: "25%", top: '-18vh', right: '17%', position: 'absolute', zIndex: 1 }}
-                  src={theme === 'dark' ? "/STANZA_B_TP.png" : "/STANZA_W_TP.png"}
+              {/* 3D model viewer */}
+              <div style={{ scale: "90%", top: '16vh', right: '80px', position: 'absolute', zIndex: -1 }}>
+                <ModelViewer
+                  url="https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/main/2.0/ToyCar/glTF-Binary/ToyCar.glb"
+                  width={"15vw"} height={"15vh"}
+                  modelXOffset={0} modelYOffset={0}
+                  enableMouseParallax enableHoverRotation
+                  environmentPreset="forest"
+                  fadeIn={true} autoRotate={true} autoRotateSpeed={0.35}
+                  showScreenshotButton={false}
                 />
-              )}
+              </div>
 
-              {/* Ring text — hidden on compact screens */}
-              {!isCompact && (
-                <CircularText
-                  text={`${username}*STANZA*`}
-                  onHover="speedUp"
-                  spinDuration={20}
-                  className={theme === "dark" ? "custom-class" : "custom-class-light"}
-                />
-              )}
+              {/* Logo */}
+              <img
+                className="logoMain"
+                style={{ scale: "25%", top: '-18vh', right: '17%', position: 'absolute', zIndex: 1 }}
+                src={theme === 'dark' ? "/STANZA_B_TP.png" : "/STANZA_W_TP.png"}
+              />
+
+              {/* Ring text */}
+              <CircularText
+                text={`${username}*STANZA*`}
+                onHover="speedUp"
+                spinDuration={20}
+                className={theme === "dark" ? "custom-class" : "custom-class-light"}
+              />
             </div>
           </main>
         </>
       )}
 
       {/* ── BOARD ── */}
-      {view === "board" && (
+      {!isCompact && view === "board" && (
         <main>
           <ModelViewer
             url="https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/main/2.0/ToyCar/glTF-Binary/ToyCar.glb"
@@ -302,14 +308,14 @@ function App() {
       )}
 
       {/* ── PROFILE ── */}
-      {view === "profile" && (
+      {!isCompact && view === "profile" && (
         <main>
           <Profile pedalStates={pedalStates} />
         </main>
       )}
 
       {/* ── SETTINGS ── */}
-      {view === "settings" && (
+      {!isCompact && view === "settings" && (
         <main>
           <Settings
             theme={theme}
