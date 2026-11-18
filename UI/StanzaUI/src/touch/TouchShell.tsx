@@ -146,6 +146,14 @@ export default function TouchShell({
   return (
     <div ref={rootRef} className={`ts-root${settings.animations ? "" : " ts-root--still"}`} data-screen={screen}>
       <div className="ts-stage">
+        {/* Logo over the page background, under every screen */}
+        <img
+          className="ts-logo"
+          src={theme === "dark" ? "/STANZA_W_TP.png" : "/STANZA_W_TP.png"}
+          alt=""
+          aria-hidden="true"
+          draggable={false}
+        />
 
         <section className={screenClass("tuner")} aria-hidden={hidden("tuner")}>
           <div className="ts-panel ts-tuner">

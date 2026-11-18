@@ -2222,3 +2222,24 @@
 [data-theme="light"] .ts-notes .rse-backing-section span {
   color: var(--ts-dim) !important;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   LOGO — behind the screens, in front of the page background
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.ts-logo {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 78%;
+  max-height: 70%;
+  object-fit: contain;
+  transform: translate(-50%, -50%);
+  opacity: 0.999;
+  pointer-events: none;
+  user-select: none;
+}
+
+.ts-screen {
+  z-index: 1;
+}

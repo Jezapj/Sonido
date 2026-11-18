@@ -282,7 +282,7 @@ function App() {
               <img
                 className="logoMain"
                 style={{ scale: "25%", top: '-18vh', right: '17%', position: 'absolute', zIndex: 1 }}
-                src={theme === 'dark' ? "/STANZA_B_TP.png" : "/STANZA_W_TP.png"}
+                src={theme === 'dark' ? "/STANZA_W_TP.png" : "/STANZA_W_TP.png"}
               />
 
               {/* Ring text */}
