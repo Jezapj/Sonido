@@ -57,7 +57,12 @@ function App() {
   useEffect(() => { setNameDraft(username); }, [username]);
 
   // ── Compact layout detection ──────────────────────────────────────────────
-  const isCompact = useCompactLayout();
+  const smallScreen = useCompactLayout();
+  // The touch layout: forced on small screens, a choice (Settings → Minimalist layout) elsewhere
+  const isCompact = smallScreen || settings.minimalUI;
+  useEffect(() => {
+    document.documentElement.dataset.touch = isCompact ? 'true' : 'false';
+  }, [isCompact]);
 
   const handleSettingsChange = useCallback(
     <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {

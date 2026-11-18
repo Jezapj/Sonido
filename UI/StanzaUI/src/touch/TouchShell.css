@@ -101,8 +101,8 @@
 
 /* App.css offsets the page by a fraction of the viewport to cancel the body
    margin; at this size the two no longer cancel and a strip of bare page shows. */
-:root[data-compact="true"],
-:root[data-compact="true"] body {
+:root[data-touch="true"],
+:root[data-touch="true"] body {
   margin: 0;
 }
 

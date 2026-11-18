@@ -14,6 +14,7 @@ export interface AppSettings {
   bgPattern:   'dots' | 'grid'; // Global background texture (both themes)
   gridSpeed:   number;        // ShapeGrid animation speed (slider 1–20 → speed 0.1–2.0)
   audioBuffer: 512 | 1024;   // ESP32 DMA buffer size preference (takes effect on firmware recompile)
+  minimalUI:   boolean;       // Use the one-screen-at-a-time touch layout on any screen size
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -24,6 +25,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   bgPattern:   'dots',
   gridSpeed:   5,
   audioBuffer: 1024,
+  minimalUI:   false,
 };
 
 // ── Props ─────────────────────────────────────────────────────────────────────
@@ -155,6 +157,12 @@ const Settings: React.FC<SettingsProps> = ({
                 </button>
               </div>
             </div>
+            <Toggle
+              checked={settings.minimalUI}
+              onChange={set('minimalUI')}
+              label="Minimalist Layout"
+              description="One tool at a time with large controls (always on for small screens)"
+            />
             <Toggle
               checked={settings.animations}
               onChange={set('animations')}
