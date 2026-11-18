@@ -3,8 +3,11 @@ import { useIsLightMode } from "./UseTheme";
 import { updatePractice, useProfileValue } from "./profileStore";
 import {
   beginRecording, discardPending, endRecording, exportTakeMidi, fmtDuration,
-  guideScore, playGuide, setGuideSound, stopGuide, tempoLabel, toggleLiveSync, unloadGuide, useTakes,
+  guideScore, MAX_TRANSPOSE, playGuide, setGuideSound, setGuideTranspose, stopGuide, tempoLabel,
+  toggleLiveSync, unloadGuide, useTakes,
 } from "./takes";
+
+const fmtSemis = (n: number) => (n > 0 ? `+${n}` : n < 0 ? `−${-n}` : "±0");
 
 const REC = "#ef4444";
 
@@ -85,6 +88,10 @@ export default function TakePanel() {
   const light = useIsLightMode();
   const sound = useProfileValue(d => d.practice.guideSound);
   useEffect(() => { setGuideSound(sound); }, [sound]);
+  const semis = useProfileValue(d => d.practice.transpose ?? 0);
+  useEffect(() => { setGuideTranspose(semis); }, [semis]);
+  const shiftBy = (d: number) =>
+    updatePractice({ transpose: Math.max(-MAX_TRANSPOSE, Math.min(MAX_TRANSPOSE, semis + d)) });
   useTicker(t.guidePlaying);
 
   const ink = light ? "rgba(26,15,46,0.75)" : "rgba(255,255,255,0.75)";
@@ -132,6 +139,24 @@ export default function TakePanel() {
             )}
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 3 }} title="Transpose the guide: score, piano and hit-checking all move">
+              <button type="button" style={{ ...btn, width: "auto", padding: "0 6px" }}
+                disabled={semis <= -MAX_TRANSPOSE} onClick={() => shiftBy(-1)} aria-label="Transpose down a semitone">−</button>
+              <button
+                type="button"
+                onClick={() => updatePractice({ transpose: 0 })}
+                title={semis ? "Back to the key it was recorded in" : "Transposed by semitones"}
+                style={{
+                  ...btn, padding: "0 2px", flex: 1, minWidth: 0,
+                  border: "none", fontVariantNumeric: "tabular-nums",
+                  color: semis ? accent : dim,
+                }}
+              >
+                KEY {fmtSemis(semis)}
+              </button>
+              <button type="button" style={{ ...btn, width: "auto", padding: "0 6px" }}
+                disabled={semis >= MAX_TRANSPOSE} onClick={() => shiftBy(1)} aria-label="Transpose up a semitone">+</button>
+            </div>
             <button
               type="button"
               onClick={() => (t.guidePlaying ? stopGuide() : playGuide())}

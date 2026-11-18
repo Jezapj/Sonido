@@ -291,6 +291,47 @@ let guidePausedAt = -GUIDE_LEAD_MS;
 let judged = new Int8Array(0);   // -1 pending, 0 missed, 1 hit
 let judgeFrom = 0;
 let guideSound = false;          // sound the guide's notes on a piano while it plays
+let guideBase: Take | null = null;   // the guide as saved, before transposing
+let transpose = 0;               // semitones the guide is moved, kept across loads
+
+export const MAX_TRANSPOSE = 12;
+
+/**
+ * The take moved by `semis` semitones. Notes are re-fingered so tab still reads;
+ * a note that falls off the neck keeps its pitch and loses its string / fret.
+ * The id is kept, so the take still counts as the same one loaded from its song.
+ */
+function transposeTake(take: Take, semis: number): Take {
+  if (!semis) return take;
+  const fing = newFingeringState();
+  return {
+    ...take,
+    notes: take.notes.map(n => {
+      const midi = n.midi + semis;
+      const f = assignFingering(midi, fing);
+      return { ...n, midi, string: f?.string ?? null, fret: f?.fret ?? null };
+    }),
+  };
+}
+
+/** Show `take` as the guide, transposed. */
+function setGuide(take: Take | null, patch: Partial<TakeSnapshot> = {}) {
+  guideBase = take;
+  update({ guide: take && transposeTake(take, transpose), ...patch });
+}
+
+export const getTranspose = (): number => transpose;
+
+/** Move the guide up or down by `semis` semitones (also applies to guides loaded later). */
+export function setGuideTranspose(semis: number) {
+  const next = Math.max(-MAX_TRANSPOSE, Math.min(MAX_TRANSPOSE, Math.round(semis)));
+  if (next === transpose) return;
+  transpose = next;
+  if (!guideBase) return;
+  stopNotes();
+  setGuide(guideBase);
+  soundGuide();   // already-scheduled notes were at the old pitch
+}
 
 /** Schedule the guide's notes from now on, heard with the metronome (ONSET_LAG_MS before the line). */
 function soundGuide() {
@@ -323,14 +364,14 @@ export function loadGuide(take: Take) {
   cueMetronome(null);
   stopNotes();
   guidePausedAt = restPosition(take);
-  update({ guide: take, guidePlaying: false });
+  setGuide(take, { guidePlaying: false });
   resetJudging();
 }
 
 export function unloadGuide() {
   cueMetronome(null);
   stopNotes();
-  update({ guide: null, guidePlaying: false });
+  setGuide(null, { guidePlaying: false });
   resetJudging();
 }
 
@@ -339,7 +380,7 @@ export function refreshGuide(take: Take) {
   if (snap.guide?.id !== take.id) return;
   if (snap.guidePlaying) stopGuide();
   guidePausedAt = restPosition(take);
-  update({ guide: take });
+  setGuide(take);
 }
 
 export function playGuide() {

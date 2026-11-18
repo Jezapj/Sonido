@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useIsLightMode } from "./UseTheme";
 import { markClickHandled } from "./focusGuard";
-import { midiToName, NOTE_NAMES, STRING_LABELS } from "./music";
+import { midiToName, NOTE_NAMES, readingKey, STRING_LABELS } from "./music";
+import { getProfile } from "./profileStore";
 import {
   getActiveNote, getNotes, getPitchFrame, getTrackerEpoch, ONSET_LAG_MS, type NoteEvent,
 } from "./pitchTracker";
@@ -15,6 +16,9 @@ import {
 } from "./rhythm";
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
+
+/** How notes are spelled right now (guitar octave, concert, B♭ …), read each frame. */
+const currentReading = () => readingKey(getProfile().practice.readAs);
 
 interface Palette {
   accent: string;
@@ -182,6 +186,7 @@ interface ClefLayout { pos: number[]; ottava: boolean[]; up: boolean[]; }
 interface ScoreView {
   take: Take;
   meter: Meter;
+  shift: number;              // semitones from sounding pitch to the staff (see READING_KEYS)
   score: Score;
   tMs: number;
   acc: Accidental[];          // per glyph
@@ -195,10 +200,12 @@ interface ScoreView {
   clefs: Partial<Record<ClefKind, ClefLayout>>;
 }
 
-const scoreViews = new WeakMap<Take, ScoreView>();
+const scoreViews = new WeakMap<Take, Map<number, ScoreView>>();
 
-function scoreView(take: Take, meter: Meter, until?: number): ScoreView {
-  const cached = scoreViews.get(take);
+function scoreView(take: Take, meter: Meter, shift: number, until?: number): ScoreView {
+  let byShift = scoreViews.get(take);
+  if (!byShift) scoreViews.set(take, (byShift = new Map()));
+  const cached = byShift.get(shift);
   if (cached) return cached;
   const score = buildScore(take.notes, meter, until);
   const { glyphs, barTicks: T } = score;
@@ -213,7 +220,7 @@ function scoreView(take: Take, meter: Meter, until?: number): ScoreView {
     const b = Math.floor(gl.tick / T);
     if (b !== bar) { bar = b; held.clear(); }
     if (gl.note < 0 || gl.tieFromPrev) { acc.push(null); continue; }
-    const { step, sharp } = diatonic(take.notes[gl.note].midi + 12);
+    const { step, sharp } = diatonic(take.notes[gl.note].midi + shift);
     const was = held.get(step) ?? false;
     held.set(step, sharp);
     acc.push(sharp && !was ? "sharp" : !sharp && was ? "natural" : null);
@@ -229,13 +236,13 @@ function scoreView(take: Take, meter: Meter, until?: number): ScoreView {
   }
 
   const view: ScoreView = {
-    take, meter, score, tMs: tickMs(meter), acc, start, end,
+    take, meter, shift, score, tMs: tickMs(meter), acc, start, end,
     kept: take.notes.filter((_, i) => !Number.isNaN(start[i])),
     minSpacing: Math.max(3, minSpacing),
     index: new Map(take.notes.map((n, i) => [n, i] as const)),
     barFirst, tupletGlyphs, clefs: {},
   };
-  scoreViews.set(take, view);
+  byShift.set(shift, view);
   return view;
 }
 
@@ -245,7 +252,7 @@ function clefLayout(sv: ScoreView, clef: ClefKind): ClefLayout {
   const pos: number[] = [], ottava: boolean[] = [];
   for (const gl of sv.score.glyphs) {
     if (gl.note < 0) { pos.push(4); ottava.push(false); continue; }
-    let { p } = staffPos(sv.take.notes[gl.note].midi + 12, clef);
+    let { p } = staffPos(sv.take.notes[gl.note].midi + sv.shift, clef);
     const o = p > 15;
     if (o) p -= 7;
     pos.push(p); ottava.push(o);
@@ -286,6 +293,7 @@ interface LiveScore {
  */
 function liveScore(
   ref: { current: LiveScore | null }, notes: readonly NoteEvent[], grid: LiveGrid, now: number, visibleMs: number,
+  shift: number,
 ): LiveScore {
   const tMs = tickMs(grid.meter), bMs = barMs(grid.meter);
   const firstBar = Math.max(0, Math.floor((now - visibleMs - grid.meter.downbeatMs) / bMs) - 1);
@@ -296,7 +304,7 @@ function liveScore(
   while (from > 0 && notes[from - 1].start >= minStart) from--;
   const last = notes[notes.length - 1];
   const nowTick = (now - winStart) / tMs;
-  const key = [grid.since, firstBar, notes.length - from, last?.id, last?.end === null, Math.floor(nowTick / 3)].join();
+  const key = [grid.since, firstBar, notes.length - from, last?.id, last?.end === null, Math.floor(nowTick / 3), shift].join();
   if (ref.current?.key === key) return ref.current;
 
   const meter: Meter = { ...grid.meter, downbeatMs: winStart };
@@ -320,7 +328,7 @@ function liveScore(
   };
   const beat = beatTicks(meter);
   const until = Math.max(0, Math.floor(nowTick / beat) * beat);
-  return (ref.current = { key, sv: scoreView(take, meter, until), src, firstBar });
+  return (ref.current = { key, sv: scoreView(take, meter, shift, until), src, firstBar });
 }
 
 // ── Bars (horizontal rhythm-game / piano-roll) ────────────────────────────────
@@ -342,6 +350,8 @@ export function NoteBarsView({ active }: { active: boolean }) {
     const notes = getNotes();
     const fr = getPitchFrame();
     const cur = getActiveNote();
+    const reading = currentReading();
+    const nameOf = (m: number) => midiToName(m + reading.names);
     const guide = getGuide();
     const meter = guide ? meterOf(guide) : null;
     const grid = guide ? null : getLiveGrid();
@@ -400,7 +410,7 @@ export function NoteBarsView({ active }: { active: boolean }) {
       const pc = ((m % 12) + 12) % 12;
       ctx.strokeStyle = pc === 0 ? p.gridStrong : p.grid;
       ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
-      if (pc === 0 || (labelAll && !NOTE_NAMES[pc].includes("#"))) labels.push([midiToName(m), y]);
+      if (pc === 0 || (labelAll && !NOTE_NAMES[pc].includes("#"))) labels.push([nameOf(m), y]);
     }
 
     // Spawn line (and the upcoming-guide region to its right)
@@ -414,7 +424,7 @@ export function NoteBarsView({ active }: { active: boolean }) {
 
     if (guide && meter) {
       const bMs = barMs(meter);
-      drawBarLines(ctx, w, p, scoreView(guide, meter).score.bars,
+      drawBarLines(ctx, w, p, scoreView(guide, meter, currentReading().staff).score.bars,
         k => nowX + ((meter.downbeatMs + k * bMs - gt) / 1000) * pps,
         { y0: 0, y1: h, numY: 10, fontPx: 10, alphaAt: () => 1 });
     } else if (grid) {
@@ -450,7 +460,7 @@ export function NoteBarsView({ active }: { active: boolean }) {
       ctx.stroke();
       ctx.shadowBlur = 0;
       ctx.fillStyle = col;
-      ctx.fillText(midiToName(n.midi), Math.max(2, x0), y + barH / 2 + 1);
+      ctx.fillText(nameOf(n.midi), Math.max(2, x0), y + barH / 2 + 1);
     }
     ctx.globalAlpha = 1;
 
@@ -472,7 +482,7 @@ export function NoteBarsView({ active }: { active: boolean }) {
       ctx.fill();
       ctx.shadowBlur = 0;
       ctx.fillStyle = isCur ? p.accent : p.ink;
-      ctx.fillText(midiToName(n.midi), Math.max(2, x0), y - barH / 2 - 1);
+      ctx.fillText(nameOf(n.midi), Math.max(2, x0), y - barH / 2 - 1);
     }
     ctx.globalAlpha = 1;
 
@@ -627,12 +637,13 @@ export function NotationView({ active, mode }: { active: boolean; mode: Notation
     const grid = guide ? null : getLiveGrid();
     const meter = guide ? meterOf(guide) : grid?.meter ?? null;
     if (guide) judgeGuide(notes, now);
+    const shift = currentReading().staff;
 
     const spawnX = guide ? Math.round(w * GUIDE_LINE_FRAC) : w - 18;
     const headerW = isTab ? Math.max(22, Math.round(h / 9)) : g * 3.4 + 6 + (meter ? g * 2.4 : 0);
     // A synced guide scrolls at a steady speed (its closest notes ≈ 2.2 staff spaces apart),
     // so live notes are placed by time too
-    const sv = guide && meter ? scoreView(guide, meter) : null;
+    const sv = guide && meter ? scoreView(guide, meter, shift) : null;
     const pxPerMs = sv
       ? Math.max((g * 2.2) / sv.minSpacing, g * 0.4) / sv.tMs
       : grid ? (g * LIVE_TICK_SPACES) / tickMs(grid.meter) : 0;
@@ -659,7 +670,7 @@ export function NotationView({ active, mode }: { active: boolean; mode: Notation
       };
     } else if (grid) {
       // Live on the metronome grid: spelled like a take, with now at the cursor
-      const live = liveScore(liveScoreRef, notes, grid, now, (spawnX - headerW) / pxPerMs);
+      const live = liveScore(liveScoreRef, notes, grid, now, (spawnX - headerW) / pxPerMs, shift);
       const { downbeatMs } = live.sv.meter, tMs = live.sv.tMs;
       synced = {
         sv: live.sv,
@@ -701,8 +712,8 @@ export function NotationView({ active, mode }: { active: boolean; mode: Notation
     } else {
       const frame = drawStaffFrame(ctx, w, h, g, p, clefRef.current, clefHitRef.current, meter);
       if (synced) drawScore(ctx, w, g, p, frame, synced, clefRef.current);
-      else if (guide && guideStyle) drawStaffNotes(ctx, w, g, frame, guide.notes, guideStyle, clefRef.current);
-      if (!grid) drawStaffNotes(ctx, w, g, frame, notes, liveStyle, clefRef.current);
+      else if (guide && guideStyle) drawStaffNotes(ctx, w, g, frame, guide.notes, guideStyle, clefRef.current, shift);
+      if (!grid) drawStaffNotes(ctx, w, g, frame, notes, liveStyle, clefRef.current, shift);
     }
 
     if (meter) drawTempo(ctx, w, guide ? p.guide : p.accent, meter);
@@ -1061,7 +1072,7 @@ function drawSyncedTab(ctx: CanvasRenderingContext2D, w: number, h: number, p: P
 
 function drawStaffNotes<T extends DrawNote>(
   ctx: CanvasRenderingContext2D, w: number, g: number, frame: StaffFrame,
-  notes: readonly T[], style: NoteStyle<T>, clef: ClefKind,
+  notes: readonly T[], style: NoteStyle<T>, clef: ClefKind, shift: number,
 ) {
   const { bottom, yOfPos } = frame;
   const rx = g * 0.66, ry = g * 0.47;
@@ -1071,7 +1082,7 @@ function drawStaffNotes<T extends DrawNote>(
     const a = style.alphaAt(x);
     if (a <= 0) continue;
 
-    let { p: pos, sharp } = staffPos(n.midi + 12, clef);
+    let { p: pos, sharp } = staffPos(n.midi + shift, clef);
     let ottava = false;
     if (pos > 15) { pos -= 7; ottava = true; }
     const y = yOfPos(pos);

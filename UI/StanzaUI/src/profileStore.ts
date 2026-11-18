@@ -33,6 +33,10 @@ export interface PracticeDefaults {
   handsOn: boolean;
   handLook: string;
   guideSound: boolean;
+  /** How the Score / Bars views spell notes (see READING_KEYS). */
+  readAs: string;
+  /** Semitones the guide take is moved up or down. */
+  transpose: number;
 }
 
 export interface ProfileData {
@@ -61,7 +65,7 @@ export interface ProfileState {
   error: string | null;
 }
 
-const DEFAULT_PRACTICE: PracticeDefaults = { bpm: 120, sigIdx: 2, volume: 0.7, handsOn: false, handLook: "outline", guideSound: false };
+const DEFAULT_PRACTICE: PracticeDefaults = { bpm: 120, sigIdx: 2, volume: 0.7, handsOn: false, handLook: "outline", guideSound: false, readAs: "guitar", transpose: 0 };
 
 function blank(name: string): ProfileData {
   return {

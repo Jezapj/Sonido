@@ -8,7 +8,8 @@ import { PianoHandControls, PianoView } from "./PianoView";
 import { HAND_TONES, type HandLook } from "./handRig";
 import TakePanel, { RecButton, SyncButton, useTakePanelVisible } from "./TakeBar";
 import { useTakes } from "./takes";
-import { getProfile, updatePractice } from "./profileStore";
+import { getProfile, updatePractice, useProfileValue } from "./profileStore";
+import { READING_KEYS, readingKey } from "./music";
 
 const GUITAR_BUF = 1024;
 const FS = 47991;
@@ -122,6 +123,11 @@ export default function RustStreamExample() {
   const light = useIsLightMode();
   const [view, setView] = useState(0);
   const [scoreMode, setScoreMode] = useState<NotationMode>("staff");
+  const reading = readingKey(useProfileValue(d => d.practice.readAs));
+  const cycleReading = () => {
+    const i = READING_KEYS.indexOf(reading);
+    updatePractice({ readAs: READING_KEYS[(i + 1) % READING_KEYS.length].id });
+  };
   const [handsOn, setHandsOn] = useState(() => getProfile().practice.handsOn);
   const [handLook, setHandLook] = useState<HandLook>(() => {
     const saved = getProfile().practice.handLook;
@@ -614,6 +620,25 @@ export default function RustStreamExample() {
                 </button>
               ))}
             </div>
+          )}
+          {(view === 1 || view === 2) && !(view === 2 && scoreMode === "tab") && (
+            <button
+              type="button"
+              className="rse-readas"
+              onClick={cycleReading}
+              title={`${reading.title}. Click to change. Only the notation moves; what you play is still checked as it sounds.`}
+              style={{
+                ...btn,
+                fontSize: 9, letterSpacing: "0.08em", padding: "2px 7px",
+                ...(reading.id !== "guitar" && {
+                  borderColor: viewAccent,
+                  color: viewAccent,
+                  background: light ? "rgba(109,40,217,0.14)" : "rgba(175,169,236,0.12)",
+                }),
+              }}
+            >
+              {reading.label}
+            </button>
           )}
         </div>
 

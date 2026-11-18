@@ -75,3 +75,33 @@ export function assignFingering(midi: number, st: FingeringState): Fingering | n
   st.started = true;
   return best;
 }
+
+// ── Written pitch (transposing instruments) ───────────────────────────────────
+
+export type ReadingKey = "guitar" | "concert" | "bb" | "eb" | "f";
+
+export interface ReadingKeyInfo {
+  id: ReadingKey;
+  label: string;
+  title: string;
+  /** Semitones from sounding pitch to where the note sits on the staff. */
+  staff: number;
+  /** Semitones added to note names in the Bars view. */
+  names: number;
+}
+
+/**
+ * How the Score and Bars views spell what sounds. Guitar music is written an octave
+ * above where it sounds; a B♭ trumpet or clarinet part a tone above; and so on.
+ * Only the notation moves: hit-judging and playback stay at sounding pitch.
+ */
+export const READING_KEYS: ReadingKeyInfo[] = [
+  { id: "guitar",  label: "GUITAR",  title: "Guitar: written an octave above where it sounds",        staff: 12, names: 0 },
+  { id: "concert", label: "CONCERT", title: "Concert pitch: written as it sounds (piano, flute, C trumpet)", staff: 0, names: 0 },
+  { id: "bb",      label: "IN B♭",   title: "B♭ instruments (trumpet, clarinet, tenor sax): written a tone above", staff: 2, names: 2 },
+  { id: "eb",      label: "IN E♭",   title: "E♭ instruments (alto sax): written a major sixth above",  staff: 9, names: 9 },
+  { id: "f",       label: "IN F",    title: "F instruments (French horn): written a fifth above",       staff: 7, names: 7 },
+];
+
+export const readingKey = (id: string | undefined): ReadingKeyInfo =>
+  READING_KEYS.find(k => k.id === id) ?? READING_KEYS[0];
