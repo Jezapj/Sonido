@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, FC } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, FC } from "react";
 import {
   claimPending, exportTakeMidi, fmtDuration, loadGuide, midiToTake, nudgeTakeSync, refreshGuide,
   retimeTake, setTakeSynced, takeFirstCount, tempoLabel, unloadGuide, useTakes,
@@ -6,6 +6,7 @@ import {
 } from "./takes";
 import { TIME_SIGNATURES } from "./DashboardMetronome";
 import { getProfile, updateProfile } from "./profileStore";
+import { useChordPractice } from "./chordPractice";
 
 export type ChordVerse = {
   label: string;
@@ -227,10 +228,29 @@ const DashboardChordBank: FC<{ size?: { w: number; h: number } }> = ({ size }) =
   const [takeError, setTakeError] = useState("");
   const midiInputRef = useRef<HTMLInputElement>(null);
 
+  // ── Practice: step through the song's chords as the chord tracker hears them ──
+  const [practicing, setPracticing] = useState(false);
+  const songChords = useMemo(() => (active ? active.verses.flatMap(v => v.chords) : []), [active]);
+  const practiceOn = practicing && mode === "view" && viewTab === "chords";
+  const practice = useChordPractice(songChords, practiceOn);
+  const chordScrollRef = useRef<HTMLDivElement>(null);
+  const currentChipRef = useRef<HTMLSpanElement>(null);
+
+  // Keep the chord to play in view as the song advances
+  useEffect(() => {
+    if (!practiceOn) return;
+    const box = chordScrollRef.current, chip = currentChipRef.current;
+    if (!box || !chip) return;
+    const top = chip.offsetTop, bottom = top + chip.offsetHeight;
+    if (top < box.scrollTop) box.scrollTop = Math.max(0, top - 18);
+    else if (bottom > box.scrollTop + box.clientHeight) box.scrollTop = bottom - box.clientHeight + 6;
+  }, [practiceOn, practice.index]);
+
   const openSong = useCallback((id: string) => {
     setActiveId(id);
     setViewTab("chords");
     setTakeError("");
+    setPracticing(false);
     setMode("view");
   }, []);
 
@@ -290,6 +310,7 @@ const DashboardChordBank: FC<{ size?: { w: number; h: number } }> = ({ size }) =
     setTitle(active.title);
     setSongKey(active.key);
     setChordText(versesToText(active.verses));
+    setPracticing(false);
     setMode("edit");
   }, [active]);
 
@@ -327,6 +348,7 @@ const DashboardChordBank: FC<{ size?: { w: number; h: number } }> = ({ size }) =
   const backToList = () => {
     setMode("list");
     setActiveId(null);
+    setPracticing(false);
   };
 
   const commitDraftFolder = useCallback(() => {
@@ -648,6 +670,18 @@ const DashboardChordBank: FC<{ size?: { w: number; h: number } }> = ({ size }) =
     return null;
   }
 
+  // Where each verse starts in the flat chord list the practice walks through
+  const verseStart: number[] = [];
+  for (let n = 0, vi = 0; vi < active.verses.length; vi++) {
+    verseStart.push(n);
+    n += active.verses[vi].chords.length;
+  }
+
+  const practiceStatus = !practice.signal ? "NO INPUT"
+    : practice.wrong ? `✗ ${practice.heard || "TRY AGAIN"}`
+    : practice.heard ? `♪ ${practice.heard}`
+    : "STRUM IT";
+
   return (
     <div className="da-chords" style={{
       width: panelW, height: panelH, display: "flex", flexDirection: "column",
@@ -685,7 +719,8 @@ const DashboardChordBank: FC<{ size?: { w: number; h: number } }> = ({ size }) =
         </button>
       </div>
 
-      <div style={{ display: "flex" }}>
+      <div style={{ display: "flex", gap: 5 }}>
+        <div style={{ display: "flex", flex: 1, minWidth: 0 }}>
         {(["chords", "takes"] as const).map((t, i) => (
           <button
             key={t}
@@ -704,7 +739,63 @@ const DashboardChordBank: FC<{ size?: { w: number; h: number } }> = ({ size }) =
             {t === "chords" ? "CHORDS" : `TAKES (${active.takes.length})`}
           </button>
         ))}
+        </div>
+        {viewTab === "chords" && (
+          <button
+            type="button"
+            onClick={() => setPracticing(p => !p)}
+            disabled={practice.total === 0}
+            title={practice.total === 0
+              ? "No chords here that can be listened for"
+              : practicing ? "Stop listening" : "Play along: each chord lights up when it is heard"}
+            style={{
+              ...btnBase,
+              flexShrink: 0, fontSize: 9, letterSpacing: "0.1em", padding: "2px 8px", borderRadius: 7,
+              borderColor: practicing ? "rgba(245,185,113,0.7)" : "rgba(255,255,255,0.18)",
+              color: practicing ? "#F5B971" : "rgba(255,255,255,0.5)",
+              background: practicing ? "rgba(245,185,113,0.12)" : "transparent",
+              opacity: practice.total === 0 ? 0.4 : 1,
+            }}
+          >
+            {practicing ? "■ STOP" : "▶ PRACTICE"}
+          </button>
+        )}
       </div>
+
+      {practiceOn && (
+        <div className={`da-prac-bar${practice.done ? " is-done" : practice.wrong ? " is-wrong" : ""}`}>
+          {practice.done ? (
+            <>
+              <span className="da-prac-target">DONE</span>
+              <span className="da-prac-status">{practice.clean}/{practice.total} FIRST TRY</span>
+              <button
+                type="button"
+                onClick={practice.restart}
+                style={{ ...btnBase, flexShrink: 0, padding: "1px 7px", fontSize: 9 }}
+              >
+                AGAIN
+              </button>
+            </>
+          ) : (
+            <>
+              <span className="da-prac-target">{songChords[practice.index]}</span>
+              <span className="da-prac-tones">
+                {practice.tones.map((t, i) => (
+                  <span
+                    key={`${t.name}-${i}`}
+                    className={`da-prac-tone${t.heard ? " is-heard" : ""}${t.required ? "" : " is-optional"}`}
+                    title={t.required ? undefined : "Often left out of this chord"}
+                  >
+                    {t.name}
+                  </span>
+                ))}
+              </span>
+              <span className="da-prac-status">{practiceStatus}</span>
+              <span className="da-prac-count">{practice.played}/{practice.total}</span>
+            </>
+          )}
+        </div>
+      )}
 
       {viewTab === "takes" ? (
         <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", gap: 4 }}>
@@ -847,8 +938,8 @@ const DashboardChordBank: FC<{ size?: { w: number; h: number } }> = ({ size }) =
           </div>
         </div>
       ) : (
-      <div className="da-songs-scroll" style={{
-        flex: 1, overflowY: "auto", minHeight: 0,
+      <div ref={chordScrollRef} className="da-songs-scroll" style={{
+        flex: 1, overflowY: "auto", minHeight: 0, position: "relative",
         paddingRight: 2, boxShadow: "none",
       }}>
         <div style={roomy ? { columnWidth: 200, columnGap: 18 } : { display: "flex", flexDirection: "column", gap: 6 }}>
@@ -862,9 +953,22 @@ const DashboardChordBank: FC<{ size?: { w: number; h: number } }> = ({ size }) =
               {v.label}
             </div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 4, justifyContent: "center" }}>
-              {v.chords.map((c, ci) => (
+              {v.chords.map((c, ci) => {
+                const at = verseStart[vi] + ci;
+                const canPlay = practiceOn && practice.playable[at];
+                const current = canPlay && at === practice.index;
+                const state = !practiceOn ? undefined
+                  : !canPlay ? "da-prac-chip is-skip"
+                  : current ? "da-prac-chip is-current"
+                  : practice.results[at] ? `da-prac-chip is-${practice.results[at]}`
+                  : "da-prac-chip";
+                return (
                 <span
                   key={`${c}-${ci}`}
+                  ref={current ? currentChipRef : undefined}
+                  className={state}
+                  onClick={canPlay ? () => practice.jump(at) : undefined}
+                  title={canPlay ? "Start from this chord" : undefined}
                   style={{
                     fontFamily: "monospace",
                     fontSize: 13,
@@ -879,7 +983,8 @@ const DashboardChordBank: FC<{ size?: { w: number; h: number } }> = ({ size }) =
                 >
                   {c}
                 </span>
-              ))}
+                );
+              })}
             </div>
           </div>
         ))}
